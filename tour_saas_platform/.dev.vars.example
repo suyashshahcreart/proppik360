@@ -1,0 +1,3 @@
+# Copy to .dev.vars and fill in (never commit .dev.vars)
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=

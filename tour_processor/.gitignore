@@ -1,0 +1,7 @@
+.env
+tour-processor
+tour-processor.exe
+*.exe
+*.log
+tmp/
+temp/

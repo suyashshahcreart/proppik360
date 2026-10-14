@@ -1,0 +1,19 @@
+{
+  // TypeScript configuration for the Cloudflare Worker (src/worker/).
+  // The frontend has its own tsconfig at src/frontend/tsconfig.json.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    // Cloudflare Workers runtime types (D1Database, R2Bucket, etc.)
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src/worker/**/*"],
+  "exclude": ["node_modules", "dist", "src/frontend"]
+}

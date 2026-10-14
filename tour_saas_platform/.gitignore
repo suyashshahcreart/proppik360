@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Vite / bundler caches (rebuilt on dev/build)
+.vite/
+node_modules/.vite/
+node_modules/.cache/
+
+# Wrangler local state (local D1 database, R2 emulation, KV store)
+.wrangler/
+
+# Local development database (created by scripts/migrate-local-node.mjs)
+.dev/
+
+# Environment files (never commit real secrets)
+.env
+.env.local
+.env.*.local
+
+# Wrangler local dev secrets (contains R2 keys — never commit)
+.dev.vars
+
+# TypeScript build info
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*

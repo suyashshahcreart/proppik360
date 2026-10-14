@@ -1,0 +1,28 @@
+# Local secrets and runtime data (never commit)
+.env
+.dev.vars
+tour_processor/.env
+tour_saas_platform/.dev.vars
+tour_saas_platform/.wrangler/
+data/platform.sqlite
+
+# Dependencies and build
+node_modules/
+dist/
+.wrangler/
+.dev/
+
+# Go build artifacts
+tour_processor/tour-processor
+tour_processor/tour-processor.exe
+
+# Temp uploads / ZIP processing
+data/temp/
+
+# Local PP6 reference — not deployed
+samples/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+*.log
