@@ -424,8 +424,9 @@ processor.post(`/artifacts/:tourId/${ARTIFACT_ADMIN}/complete`, async (c) => {
     artifactType: ARTIFACT_ADMIN,
     publicDomain: domain || 'localhost',
     layout: layout ?? null,
+    publishUrl: publishUrl ?? null,
   })
-  const finalUrl = publishUrl || ready.publishUrl
+  const finalUrl = ready.publishUrl
   const wantsBackup = Boolean(saveBackupZip)
   const postReadyStage = wantsBackup ? 'ready_pending_backup' : 'cleanup'
   const now = new Date().toISOString()

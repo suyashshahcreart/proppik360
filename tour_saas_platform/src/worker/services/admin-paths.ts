@@ -38,8 +38,8 @@ export function buildAdminBackupKey(
   return `${adminR2Prefix(tourId)}backup_zip/${buildBackupObjectName(zipBaseName, version, timestamp)}`
 }
 
-/** Public admin site URL (no trailing slash on domain). */
+/** Public admin site entry URL (same shape as viewer: …/{tourId}/index.html). */
 export function adminPublishUrl(publicDomain: string, tourId: string): string {
   const host = publicDomain.replace(/^https?:\/\//, '').replace(/\/$/, '')
-  return `https://${host}/${tourId}/`
+  return `https://${host}/${tourId}/index.html`
 }

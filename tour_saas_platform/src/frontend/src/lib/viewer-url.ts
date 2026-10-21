@@ -23,3 +23,32 @@ export function resolveTourViewerUrl(
   if (viewerUrl?.trim()) return viewerUrl.trim()
   return buildExpectedViewerUrl(tourId)
 }
+
+function normalizeAdminEntryUrl(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) return trimmed
+  if (trimmed.endsWith('/index.html') || trimmed.includes('/index.html?')) return trimmed
+  if (trimmed.endsWith('/')) return `${trimmed}index.html`
+  return `${trimmed}/index.html`
+}
+
+/** Admin package public URL (separate R2 bucket / domain). */
+export function buildExpectedAdminUrl(
+  tourId: string,
+  publicDomain?: string | null,
+): string | null {
+  const raw = publicDomain?.trim()
+  if (!raw) return null
+  const host = raw.replace(/^https?:\/\//, '').replace(/\/$/, '')
+  return `https://${host}/${tourId}/index.html`
+}
+
+export function resolveAdminPublishUrl(
+  tourId: string | null | undefined,
+  publishUrl: string | null | undefined,
+  publicDomain?: string | null,
+): string | null {
+  if (!tourId) return null
+  if (publishUrl?.trim()) return normalizeAdminEntryUrl(publishUrl)
+  return buildExpectedAdminUrl(tourId, publicDomain)
+}

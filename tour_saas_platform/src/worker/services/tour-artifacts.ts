@@ -91,10 +91,13 @@ export async function markTourArtifactReady(
     artifactType: string
     publicDomain: string
     layout?: string | null
+    /** From Go processor when available (includes index.html). */
+    publishUrl?: string | null
   },
 ): Promise<{ publishUrl: string }> {
   const now = new Date().toISOString()
-  const publishUrl = adminPublishUrl(input.publicDomain, input.tourId)
+  const publishUrl =
+    input.publishUrl?.trim() || adminPublishUrl(input.publicDomain, input.tourId)
   const existing = await getTourArtifact(db, input.tourId, input.artifactType)
   if (existing) {
     await db

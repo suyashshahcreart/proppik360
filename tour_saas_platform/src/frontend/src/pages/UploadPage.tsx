@@ -35,7 +35,7 @@ import {
   resolveUploadTourId,
   uploadPagePath,
 } from '@/lib/upload-routes'
-import { resolveTourViewerUrl } from '@/lib/viewer-url'
+import { resolveAdminPublishUrl, resolveTourViewerUrl } from '@/lib/viewer-url'
 
 type PageState = 'form' | 'pipeline' | 'error'
 
@@ -1532,10 +1532,11 @@ export function UploadPage() {
     ? (adminStatus as Tour['status'] | null) ?? null
     : (tour?.status ?? selectedTourMeta?.status)
   const tourViewerUrl = isAdminArtifact
-    ? adminPublishInfo?.publishUrl ??
-      (selectedTourId && adminPublishInfo?.publicDomain
-        ? `https://${adminPublishInfo.publicDomain.replace(/^https?:\/\//, '').replace(/\/$/, '')}/${selectedTourId}/`
-        : null)
+    ? resolveAdminPublishUrl(
+        selectedTourId,
+        adminPublishInfo?.publishUrl,
+        adminPublishInfo?.publicDomain,
+      )
     : selectedTourId
       ? resolveTourViewerUrl(selectedTourId, tour?.viewer_url)
       : null
