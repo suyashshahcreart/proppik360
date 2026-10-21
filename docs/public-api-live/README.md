@@ -1,6 +1,11 @@
 # Tour Admin Public API — live docs mirror
 
-Published on the VPS at **https://360.proppik.cloud/document/** (static files from `tour_saas_platform/src/frontend/public/document/`).
+Published on the VPS at **https://360.proppik.cloud/api-docs/** (files on disk: `/var/www/html/domain/360.proppik.cloud/public_html/document/`).
+
+Direct downloads (no `/document` in URL):
+
+- https://360.proppik.cloud/tour-admin-public-api.md
+- https://360.proppik.cloud/PropPIK360-Tour-Admin-Public.postman_collection.json
 
 | File | Purpose |
 |------|---------|

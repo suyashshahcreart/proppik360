@@ -2,7 +2,7 @@
 
 **Base URL:** `https://360.proppik.cloud`  
 **API prefix:** `/api/tour-admin`  
-**Live docs:** https://360.proppik.cloud/document/
+**Live docs:** https://360.proppik.cloud/api-docs/
 
 This document covers **two public API groups** for integrators (tour viewer / admin apps). They do **not** use the SaaS platform login cookie.
 
@@ -236,7 +236,7 @@ Deletes up to **200** keys per call; if `truncated: true`, call again.
 
 Import:
 
-**https://360.proppik.cloud/document/PropPIK360-Tour-Admin-Public.postman_collection.json**
+**https://360.proppik.cloud/PropPIK360-Tour-Admin-Public.postman_collection.json**
 
 Variables:
 
