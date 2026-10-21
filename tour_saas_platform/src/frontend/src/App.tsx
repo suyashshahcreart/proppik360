@@ -16,6 +16,7 @@ import { SystemRolesPage } from './pages/SystemRolesPage'
 import { SystemUsersPage } from './pages/SystemUsersPage'
 import { MediaLibraryPage } from './pages/MediaLibraryPage'
 import { PropertyTypesPage } from './pages/PropertyTypesPage'
+import { SettingsPage } from './pages/SettingsPage'
 import type { User } from './types'
 
 /** Returns true if the user has the given permission. */
@@ -24,18 +25,30 @@ function can(user: User | null, permission: string): boolean {
   return user.permissions.includes(permission)
 }
 
+function canAny(user: User | null, permissions: string[]): boolean {
+  if (!user) return false
+  return permissions.some((p) => user.permissions.includes(p))
+}
+
 /** Route guard — redirects to /dashboard if permission is absent. */
 function PermissionRoute({
   user,
   permission,
+  anyOf,
   children,
 }: {
   user: User | null
-  permission: string
+  permission?: string
+  anyOf?: string[]
   children: React.ReactNode
 }) {
   if (!user) return <Navigate to="/login" replace />
-  if (!can(user, permission)) return <Navigate to="/dashboard" replace />
+  const allowed = anyOf?.length
+    ? canAny(user, anyOf) || (permission ? can(user, permission) : false)
+    : permission
+      ? can(user, permission)
+      : true
+  if (!allowed) return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
 
@@ -61,7 +74,7 @@ export function App() {
 
   return (
     <BrowserRouter>
-      <Toaster position="top-right" />
+      <Toaster position="top-right" richColors closeButton expand={false} />
       <Routes>
         {/* Public route — redirect to dashboard if already logged in */}
         <Route
@@ -110,7 +123,7 @@ export function App() {
             path="tours/new"
             element={
               <PermissionRoute user={user} permission="tour_create">
-                <TourDetailsPage />
+                {user ? <TourDetailsPage user={user} /> : null}
               </PermissionRoute>
             }
           />
@@ -119,7 +132,7 @@ export function App() {
             path="tours/:tourId/edit"
             element={
               <PermissionRoute user={user} permission="tour_edit">
-                <TourDetailsPage />
+                {user ? <TourDetailsPage user={user} /> : null}
               </PermissionRoute>
             }
           />
@@ -184,6 +197,25 @@ export function App() {
             element={
               <PermissionRoute user={user} permission="user_view">
                 <SystemUsersPage />
+              </PermissionRoute>
+            }
+          />
+
+          <Route
+            path="system/settings"
+            element={
+              <PermissionRoute
+                user={user}
+                permission="setting_view"
+                anyOf={[
+                  'setting_view',
+                  'setting_edit',
+                  'setting_general',
+                  'setting_sms',
+                  'setting_tour_admin',
+                ]}
+              >
+                {user ? <SettingsPage user={user} /> : null}
               </PermissionRoute>
             }
           />

@@ -23,7 +23,7 @@
 // Individual routes add requirePermission('resource_action')
 // ============================================================
 import { Hono } from 'hono'
-import { authMiddleware, requirePermission, requireNotCustomer } from '../middleware/auth'
+import { authMiddleware, requirePermission, requireAnyPermission, requireNotCustomer } from '../middleware/auth'
 import {
   listPermissions,
   getPermission,
@@ -48,6 +48,21 @@ import {
   deleteAdminUser,
   type AdminUserRow,
 } from '../services/users-admin'
+import { getSettingsMap, upsertSettings, ALL_SETTINGS_KEYS } from '../services/settings'
+import { serializeMsg91Templates } from '../services/msg91-templates'
+import {
+  getMaster,
+  updateMaster,
+  masterToPublic,
+} from '../services/tour-admin-master'
+import {
+  listTemplates,
+  getTemplate,
+  createTemplate,
+  updateTemplate,
+  deleteTemplate,
+  templateToPublic,
+} from '../services/tour-admin-templates'
 import { logActivity } from '../services/activity'
 import { ok, err } from '../utils/response'
 import {
@@ -55,8 +70,17 @@ import {
   createRoleSchema,
   createAdminUserSchema,
   updateAdminUserSchema,
+  settingsPatchSchema,
+  tourAdminMasterPutSchema,
+  tourAdminTemplateBodySchema,
 } from '../utils/validation'
 import type { Env, Variables } from '../types'
+
+function settingFlag(v: unknown): string {
+  if (v === true || v === 1 || v === '1') return '1'
+  if (v === false || v === 0 || v === '0') return '0'
+  return String(v ?? '')
+}
 
 const system = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -366,6 +390,210 @@ system.delete('/users/:id', requirePermission('user_delete'), async (c) => {
 
   return c.json(ok({ message: 'User deleted' }))
 })
+
+// ── SETTINGS ──────────────────────────────────────────────────
+
+const SETTINGS_READ_PERMS = [
+  'setting_view',
+  'setting_edit',
+  'setting_general',
+  'setting_sms',
+  'setting_tour_admin',
+] as const
+
+system.get('/settings', requireAnyPermission(...SETTINGS_READ_PERMS), async (c) => {
+  const map = await getSettingsMap(c.env.DB, [...ALL_SETTINGS_KEYS])
+  return c.json(ok(map))
+})
+
+system.patch('/settings', async (c) => {
+  // Per-tab permission checked after parse
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json(err('INVALID_INPUT', 'Request body must be valid JSON'), 422)
+  }
+
+  const parsed = settingsPatchSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json(err('INVALID_INPUT', parsed.error.errors[0].message), 422)
+  }
+
+  const perms = c.get('userPermissions')
+  const tab = parsed.data.tab
+  const need =
+    tab === 'general'
+      ? (['setting_general', 'setting_edit'] as const)
+      : (['setting_sms', 'setting_edit'] as const)
+  if (!need.some((p) => perms.has(p))) {
+    return c.json(err('FORBIDDEN', 'Insufficient permissions'), 403)
+  }
+
+  const pairs: Record<string, string | null> = {}
+  if (tab === 'general') {
+    const d = parsed.data
+    if (d.support_email !== undefined) pairs.support_email = d.support_email
+    if (d.support_phone !== undefined) pairs.support_phone = d.support_phone
+    if (d.tour_admin_api_base_url !== undefined) {
+      pairs.tour_admin_api_base_url = d.tour_admin_api_base_url
+    }
+  } else {
+    const d = parsed.data
+    if (d.sms_msg91_enabled !== undefined) pairs.sms_msg91_enabled = settingFlag(d.sms_msg91_enabled)
+    if (d.msg91_sender_id !== undefined) pairs.msg91_sender_id = d.msg91_sender_id
+    if (d.msg91_otp_template_id !== undefined) pairs.msg91_otp_template_id = d.msg91_otp_template_id
+    if (d.msg91_templates !== undefined) {
+      const map: Record<string, string> = {}
+      for (const row of d.msg91_templates) {
+        map[row.key] = row.template_id
+      }
+      pairs.msg91_templates = serializeMsg91Templates(map)
+      // Keep legacy single field in sync with tour_access_otp (or login_otp)
+      if (map.tour_access_otp) pairs.msg91_otp_template_id = map.tour_access_otp
+      else if (map.login_otp) pairs.msg91_otp_template_id = map.login_otp
+    }
+    if (d.msg91_timeout_ms !== undefined) pairs.msg91_timeout_ms = String(d.msg91_timeout_ms)
+    if (d.msg91_route !== undefined) pairs.msg91_route = d.msg91_route
+    if (d.otp_length !== undefined) pairs.otp_length = String(d.otp_length)
+    if (d.otp_expiry_sec !== undefined) pairs.otp_expiry_sec = String(d.otp_expiry_sec)
+    if (d.msg91_mock_mode !== undefined) pairs.msg91_mock_mode = settingFlag(d.msg91_mock_mode)
+  }
+
+  const actor = c.get('user')
+  const updated = await upsertSettings(c.env.DB, pairs, actor.id)
+  await logActivity(c.env.DB, actor.id, 'updated', 'settings', tab, { keys: Object.keys(pairs) })
+  return c.json(ok(updated))
+})
+
+system.get(
+  '/tour-admin-master',
+  requireAnyPermission('setting_tour_admin', 'setting_view', 'setting_edit'),
+  async (c) => {
+    const master = await getMaster(c.env.DB)
+    return c.json(ok(masterToPublic(master)))
+  },
+)
+
+system.put('/tour-admin-master', requirePermission('setting_tour_admin'), async (c) => {
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json(err('INVALID_INPUT', 'Request body must be valid JSON'), 422)
+  }
+
+  const parsed = tourAdminMasterPutSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json(err('INVALID_INPUT', parsed.error.errors[0].message), 422)
+  }
+
+  const actor = c.get('user')
+  const master = await updateMaster(c.env.DB, parsed.data, actor.id)
+  await logActivity(c.env.DB, actor.id, 'updated', 'tour_admin_master', 'default')
+  return c.json(ok(masterToPublic(master)))
+})
+
+// ── TOUR ADMIN MASTER TEMPLATES ───────────────────────────────
+
+system.get(
+  '/tour-admin-master/templates',
+  requireAnyPermission('setting_tour_admin', 'setting_view', 'setting_edit'),
+  async (c) => {
+    const rows = await listTemplates(c.env.DB)
+    return c.json(ok(rows))
+  },
+)
+
+system.get(
+  '/tour-admin-master/templates/:id',
+  requireAnyPermission('setting_tour_admin', 'setting_view', 'setting_edit'),
+  async (c) => {
+    const row = await getTemplate(c.env.DB, c.req.param('id'))
+    if (!row) return c.json(err('NOT_FOUND', 'Template not found'), 404)
+    return c.json(ok(templateToPublic(row)))
+  },
+)
+
+system.post('/tour-admin-master/templates', requirePermission('setting_tour_admin'), async (c) => {
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json(err('INVALID_INPUT', 'Request body must be valid JSON'), 422)
+  }
+
+  const parsed = tourAdminTemplateBodySchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json(err('INVALID_INPUT', parsed.error.errors[0].message), 422)
+  }
+
+  try {
+    const actor = c.get('user')
+    const created = await createTemplate(c.env.DB, parsed.data, actor.id)
+    await logActivity(c.env.DB, actor.id, 'created', 'tour_admin_template', created.id)
+    return c.json(ok(created), 201)
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Could not create template'
+    const field =
+      e && typeof e === 'object' && 'field' in e
+        ? String((e as { field: unknown }).field)
+        : undefined
+    return c.json(err('INVALID_INPUT', message, field ? { field } : undefined), 422)
+  }
+})
+
+system.put(
+  '/tour-admin-master/templates/:id',
+  requirePermission('setting_tour_admin'),
+  async (c) => {
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json(err('INVALID_INPUT', 'Request body must be valid JSON'), 422)
+    }
+
+    const parsed = tourAdminTemplateBodySchema.safeParse(body)
+    if (!parsed.success) {
+      return c.json(err('INVALID_INPUT', parsed.error.errors[0].message), 422)
+    }
+
+    try {
+      const actor = c.get('user')
+      const updated = await updateTemplate(c.env.DB, c.req.param('id'), parsed.data, actor.id)
+      await logActivity(c.env.DB, actor.id, 'updated', 'tour_admin_template', updated.id)
+      return c.json(ok(updated))
+    } catch (e) {
+      const code =
+        e && typeof e === 'object' && 'code' in e
+          ? String((e as { code: unknown }).code)
+          : 'INVALID_INPUT'
+      const message = e instanceof Error ? e.message : 'Could not update template'
+      const field =
+        e && typeof e === 'object' && 'field' in e
+          ? String((e as { field: unknown }).field)
+          : undefined
+      return c.json(
+        err(code, message, field ? { field } : undefined),
+        code === 'NOT_FOUND' ? 404 : 422,
+      )
+    }
+  },
+)
+
+system.delete(
+  '/tour-admin-master/templates/:id',
+  requirePermission('setting_tour_admin'),
+  async (c) => {
+    const id = c.req.param('id')
+    const deleted = await deleteTemplate(c.env.DB, id)
+    if (!deleted) return c.json(err('NOT_FOUND', 'Template not found'), 404)
+    const actor = c.get('user')
+    await logActivity(c.env.DB, actor.id, 'deleted', 'tour_admin_template', id)
+    return c.json(ok({ message: 'Template deleted' }))
+  },
+)
 
 // ── Helpers ───────────────────────────────────────────────────
 

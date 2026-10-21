@@ -1,0 +1,580 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-tour-admin-proppik360",
+    "name": "PropPIK360 — Tour Admin APIs",
+    "description": "Tour-wise admin APIs only (not SaaS platform user RBAC beyond login helper).\n\n**Variables**\n- `apiBase` — API root without trailing slash (local: `http://127.0.0.1:8787`)\n- `tourId` — 6-digit tour id\n- `tourAdminToken` — set automatically after public password/OTP login\n- `tourAdminApiKey` — optional; required when server has `TOUR_ADMIN_API_KEY`\n- `tourAdminId` — UUID from list/create (for edit/delete/reset)\n- `saasEmail` / `saasPassword` — for management endpoints (session cookie)\n\n**Response shape:** `{ success, data }` or `{ success: false, error: { code, message, details? } }`\n\nFolder 6 is the viewer-bucket FS API (`proppik360/{tourId}/`) for the other project. Login in folder 1 first.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "apiBase", "value": "http://127.0.0.1:8787" },
+    { "key": "tourId", "value": "000002" },
+    { "key": "tourAdminToken", "value": "" },
+    { "key": "tourAdminApiKey", "value": "" },
+    { "key": "tourAdminId", "value": "" },
+    { "key": "templateId", "value": "" },
+    { "key": "saasEmail", "value": "admin@example.com" },
+    { "key": "saasPassword", "value": "" },
+    { "key": "fsPath", "value": "assets" },
+    { "key": "fsFilePath", "value": "assets/custom/note.json" }
+  ],
+  "item": [
+    {
+      "name": "1. Public — Tour login (/api/tour-admin)",
+      "description": "No SaaS cookie. Optional header `X-Tour-Admin-Api-Key: {{tourAdminApiKey}}` (or same value as Bearer) when env `TOUR_ADMIN_API_KEY` is set.",
+      "item": [
+        {
+          "name": "Get public config",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/config",
+            "description": "Returns password/OTP flags and admin count for the tour."
+          }
+        },
+        {
+          "name": "Login — password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.response.code === 200 && j.data && j.data.token) {",
+                  "  pm.collectionVariables.set('tourAdminToken', j.data.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin-{{tourId}}\",\n  \"password\": \"your-password-here\"\n}"
+            },
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/login/password"
+          }
+        },
+        {
+          "name": "OTP — send",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"9876543210\"\n}"
+            },
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/otp/send",
+            "description": "Uses MSG91 (or mock mode logs OTP on server)."
+          }
+        },
+        {
+          "name": "OTP — verify",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.response.code === 200 && j.data && j.data.token) {",
+                  "  pm.collectionVariables.set('tourAdminToken', j.data.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"9876543210\",\n  \"otp\": \"123456\"\n}"
+            },
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/otp/verify"
+          }
+        },
+        {
+          "name": "Get session",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tourAdminToken}}"
+              },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/session?token={{tourAdminToken}}",
+            "description": "Bearer header or `?token=` query."
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tourAdminToken}}"
+              },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. SaaS helper — Login (for manage APIs only)",
+      "description": "Platform user login — sets session cookie for requests in folder 3–4. Not tour-admin login.",
+      "item": [
+        {
+          "name": "POST /api/auth/login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{saasEmail}}\",\n  \"password\": \"{{saasPassword}}\"\n}"
+            },
+            "url": "{{apiBase}}/api/auth/login",
+            "description": "Enable Postman cookie jar for `apiBase` host. Subsequent SaaS tour-admin manage calls use the cookie."
+          }
+        },
+        {
+          "name": "GET /api/auth/me",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/auth/me",
+            "description": "Verify SaaS session after login."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. SaaS — Manage tour admins (/api/tours/:id/tour-admin)",
+      "description": "Requires SaaS session cookie + permissions `tour_admin_view` / `tour_admin_edit` (and tour access).",
+      "item": [
+        {
+          "name": "List tour admins",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.response.code === 200 && j.data && j.data.admins && j.data.admins[0]) {",
+                  "  pm.collectionVariables.set('tourAdminId', j.data.admins[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/tours/{{tourId}}/tour-admin"
+          }
+        },
+        {
+          "name": "Create tour admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.response.code === 200 && j.data && j.data.id) {",
+                  "  pm.collectionVariables.set('tourAdminId', j.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin-{{tourId}}-2\",\n  \"password\": \"Secret123456\",\n  \"country_code\": \"+91\",\n  \"mobile\": \"9876543210\",\n  \"password_enabled\": true,\n  \"otp_enabled\": true,\n  \"is_active\": true\n}"
+            },
+            "url": "{{apiBase}}/api/tours/{{tourId}}/tour-admin",
+            "description": "Omit `id` to create. Response may include generated password when applicable."
+          }
+        },
+        {
+          "name": "Update tour admin",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{tourAdminId}}\",\n  \"username\": \"admin-{{tourId}}\",\n  \"password\": null,\n  \"country_code\": \"+91\",\n  \"mobile\": \"9876543210\",\n  \"password_enabled\": true,\n  \"otp_enabled\": true,\n  \"is_active\": true\n}"
+            },
+            "url": "{{apiBase}}/api/tours/{{tourId}}/tour-admin",
+            "description": "Include `id`. Leave `password` null to keep existing hash."
+          }
+        },
+        {
+          "name": "Reset password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{tourAdminId}}\",\n  \"password\": null\n}"
+            },
+            "url": "{{apiBase}}/api/tours/{{tourId}}/tour-admin/reset-password",
+            "description": "Omit password or null = server generates random password in response."
+          }
+        },
+        {
+          "name": "Delete tour admin",
+          "request": {
+            "method": "DELETE",
+            "url": "{{apiBase}}/api/tours/{{tourId}}/tour-admin/{{tourAdminId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. SaaS — Tour master admin settings (/api/system)",
+      "description": "Default admins on new tour + template CRUD. Permission `setting_tour_admin`.",
+      "item": [
+        {
+          "name": "Get tour-admin master",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/system/tour-admin-master"
+          }
+        },
+        {
+          "name": "Update tour-admin master",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"auto_create_on_tour_create\": true,\n  \"password_enabled_default\": true,\n  \"otp_enabled_default\": true,\n  \"default_username_pattern\": \"admin-{tour_id}\",\n  \"password_mode\": \"random\",\n  \"default_country_code\": \"+91\",\n  \"is_active_default\": true\n}"
+            },
+            "url": "{{apiBase}}/api/system/tour-admin-master"
+          }
+        },
+        {
+          "name": "List master templates",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.response.code === 200 && Array.isArray(j.data) && j.data[0]) {",
+                  "  pm.collectionVariables.set('templateId', j.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/system/tour-admin-master/templates"
+          }
+        },
+        {
+          "name": "Get master template by id",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/system/tour-admin-master/templates/{{templateId}}"
+          }
+        },
+        {
+          "name": "Create master template",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.response.code === 201 && j.data && j.data.id) {",
+                  "  pm.collectionVariables.set('templateId', j.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Default admin\",\n  \"username_pattern\": \"admin-{tour_id}\",\n  \"password_mode\": \"random\",\n  \"country_code\": \"+91\",\n  \"password_enabled\": true,\n  \"otp_enabled\": true,\n  \"is_active\": true,\n  \"sort_order\": 0\n}"
+            },
+            "url": "{{apiBase}}/api/system/tour-admin-master/templates"
+          }
+        },
+        {
+          "name": "Update master template",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Default admin\",\n  \"username_pattern\": \"admin-{tour_id}\",\n  \"password_mode\": \"random\",\n  \"country_code\": \"+91\",\n  \"password_enabled\": true,\n  \"otp_enabled\": true,\n  \"is_active\": true,\n  \"sort_order\": 0\n}"
+            },
+            "url": "{{apiBase}}/api/system/tour-admin-master/templates/{{templateId}}"
+          }
+        },
+        {
+          "name": "Delete master template",
+          "request": {
+            "method": "DELETE",
+            "url": "{{apiBase}}/api/system/tour-admin-master/templates/{{templateId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. SaaS — Admin package artifact upload",
+      "description": "Requires SaaS cookie + `tour_admin_upload`. Does not change tours.status. Needs R2_ADMIN_BUCKET_NAME + R2_ADMIN_PUBLIC_DOMAIN. Chunk upload is binary — use the Upload page UI for full ZIP transfer.",
+      "item": [
+        {
+          "name": "Initiate admin ingest",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"filename\": \"admin-package.zip\",\n  \"fileSize\": 1048576,\n  \"saveBackupZip\": false\n}"
+            },
+            "url": "{{apiBase}}/api/tours/{{tourId}}/artifacts/tour_admin/ingest/initiate"
+          }
+        },
+        {
+          "name": "Admin ingest status",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/tours/{{tourId}}/artifacts/tour_admin/ingest/status"
+          }
+        },
+        {
+          "name": "Complete admin ingest",
+          "request": {
+            "method": "POST",
+            "url": "{{apiBase}}/api/tours/{{tourId}}/artifacts/tour_admin/ingest/complete"
+          }
+        },
+        {
+          "name": "Abort admin ingest",
+          "request": {
+            "method": "POST",
+            "url": "{{apiBase}}/api/tours/{{tourId}}/artifacts/tour_admin/ingest/abort"
+          }
+        },
+        {
+          "name": "Admin artifact history",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/tours/{{tourId}}/artifacts/tour_admin/history"
+          }
+        },
+        {
+          "name": "Admin publish info",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/tours/{{tourId}}/artifacts/tour_admin/publish-info"
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Public — Tour viewer FS (/api/tour-admin/:tourId/fs)",
+      "description": "Viewer bucket only (`proppik360/{tourId}/`). Requires Bearer `{{tourAdminToken}}` from folder 1. Optional `X-Tour-Admin-Api-Key` when server has `TOUR_ADMIN_API_KEY`. Does not change tours.status.",
+      "item": [
+        {
+          "name": "List folder",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tourAdminToken}}"
+              },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/fs/list?path={{fsPath}}",
+            "description": "List files and folders under the relative path. Empty path = tour root. `backup_zip` is hidden at root."
+          }
+        },
+        {
+          "name": "Get object meta",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tourAdminToken}}"
+              },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/fs/object?path={{fsFilePath}}",
+            "description": "Metadata + public viewer URL. Does not stream file bytes."
+          }
+        },
+        {
+          "name": "Get object download URL",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tourAdminToken}}"
+              },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/fs/object?path={{fsFilePath}}&download=1",
+            "description": "Same as meta plus a short-lived presigned GET (`downloadUrl`). R2 keys are not returned."
+          }
+        },
+        {
+          "name": "Create folder",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tourAdminToken}}"
+              },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"assets/custom\"\n}"
+            },
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/fs/mkdir",
+            "description": "Idempotent. Writes `{tourId}/{path}/.keep` so the folder appears in list."
+          }
+        },
+        {
+          "name": "Put / overwrite file",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tourAdminToken}}"
+              },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hello\": true\n}"
+            },
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/fs/object?path={{fsFilePath}}",
+            "description": "Create or overwrite. Raw body, max 5 MB. Allowed types only."
+          }
+        },
+        {
+          "name": "Delete file",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tourAdminToken}}"
+              },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/fs/object?path={{fsFilePath}}",
+            "description": "Deletes one file. Protected paths (`backup_zip`, `.manifest.json`, `original.zip`, `index.html`) return 403."
+          }
+        },
+        {
+          "name": "Delete folder recursive",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tourAdminToken}}"
+              },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/fs/object?path=assets/custom&recursive=true",
+            "description": "Deletes up to 200 keys under the folder prefix. `truncated: true` means call again."
+          }
+        }
+      ]
+    }
+  ]
+}

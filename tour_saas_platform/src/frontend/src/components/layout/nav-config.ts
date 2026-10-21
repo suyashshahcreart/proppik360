@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   KeyRound,
   Building2,
+  Settings,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -15,7 +16,9 @@ export interface NavItem {
   label: string
   to: string
   icon: LucideIcon
+  /** Primary permission; if anyOf is set, either primary or anyOf grants access. */
   permission: string
+  anyOf?: string[]
 }
 
 export interface NavSection {
@@ -47,6 +50,19 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: 'System',
     items: [
+      {
+        label: 'Settings',
+        to: '/system/settings',
+        icon: Settings,
+        permission: 'setting_view',
+        anyOf: [
+          'setting_view',
+          'setting_edit',
+          'setting_general',
+          'setting_sms',
+          'setting_tour_admin',
+        ],
+      },
       { label: 'Users', to: '/system/users', icon: UserCog, permission: 'user_view' },
       { label: 'Roles', to: '/system/roles', icon: ShieldCheck, permission: 'role_view' },
       { label: 'Permissions', to: '/system/permissions', icon: KeyRound, permission: 'permission_view' },

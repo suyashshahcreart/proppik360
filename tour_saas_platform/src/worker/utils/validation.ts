@@ -344,3 +344,100 @@ export const propertyCategoryBodySchema = z.object({
   status: propertyStatusSchema,
   sort_order: propertySortOrderSchema,
 })
+
+// ── Settings ─────────────────────────────────────────────────
+
+const settingsGeneralPatchSchema = z.object({
+  tab: z.literal('general'),
+  support_email: z.string().max(255).optional(),
+  support_phone: z.string().max(40).optional(),
+  tour_admin_api_base_url: z.string().max(2048).optional(),
+})
+
+const msg91TemplateEntrySchema = z.object({
+  key: z
+    .string()
+    .min(1)
+    .max(80)
+    .regex(/^[a-z][a-z0-9_]*$/, 'Template key must be snake_case (e.g. tour_access_otp)'),
+  template_id: z.string().max(100),
+})
+
+const settingsSmsPatchSchema = z.object({
+  tab: z.literal('sms'),
+  sms_msg91_enabled: z.union([z.boolean(), z.literal('0'), z.literal('1'), z.number()]).optional(),
+  msg91_sender_id: z.string().max(20).optional(),
+  /** @deprecated Prefer msg91_templates.tour_access_otp — kept for backward compat. */
+  msg91_otp_template_id: z.string().max(100).optional(),
+  /** BrokerX-style list of { key, template_id }; stored as JSON map. */
+  msg91_templates: z.array(msg91TemplateEntrySchema).max(50).optional(),
+  msg91_timeout_ms: z.coerce.number().int().min(1000).max(120000).optional(),
+  msg91_route: z.string().max(10).optional(),
+  otp_length: z.coerce.number().int().min(4).max(8).optional(),
+  otp_expiry_sec: z.coerce.number().int().min(60).max(900).optional(),
+  msg91_mock_mode: z.union([z.boolean(), z.literal('0'), z.literal('1'), z.number()]).optional(),
+})
+
+export const settingsPatchSchema = z.discriminatedUnion('tab', [
+  settingsGeneralPatchSchema,
+  settingsSmsPatchSchema,
+])
+
+export const tourAdminMasterPutSchema = z.object({
+  auto_create_on_tour_create: z.boolean().optional(),
+  password_enabled_default: z.boolean().optional(),
+  otp_enabled_default: z.boolean().optional(),
+  default_username_pattern: z.string().min(1).max(80).optional(),
+  password_mode: z.enum(['random', 'fixed']).optional(),
+  default_password: z.string().min(6).max(128).optional().nullable(),
+  default_country_code: z.string().max(10).optional(),
+  default_mobile: z.string().max(20).optional().nullable(),
+  is_active_default: z.boolean().optional(),
+})
+
+export const tourAdminTemplateBodySchema = z.object({
+  label: z.string().min(1).max(120).trim(),
+  username_pattern: z.string().min(1).max(80).trim(),
+  password_mode: z.enum(['random', 'fixed']),
+  password: z.string().min(6).max(128).optional().nullable(),
+  country_code: z.string().max(10).optional(),
+  mobile: z.string().max(20).optional().nullable(),
+  password_enabled: z.boolean().optional(),
+  otp_enabled: z.boolean().optional(),
+  is_active: z.boolean().optional(),
+  sort_order: z.number().int().min(0).max(9999).optional(),
+})
+
+export const tourAdminPutSchema = z.object({
+  id: z.string().uuid().optional(),
+  username: z.string().min(1).max(80).trim(),
+  password: z.string().min(6).max(128).optional().nullable(),
+  country_code: z.string().max(10).optional(),
+  mobile: z.string().max(20).optional().nullable(),
+  password_enabled: z.boolean().optional(),
+  otp_enabled: z.boolean().optional(),
+  is_active: z.boolean().optional(),
+})
+
+export const tourAdminResetPasswordSchema = z.object({
+  id: z.string().uuid().optional(),
+  password: z.string().min(6).max(128).optional().nullable(),
+})
+
+export const tourAdminPasswordLoginSchema = z.object({
+  username: z.string().min(1).max(80).trim(),
+  password: z.string().min(1).max(128),
+})
+
+export const tourAdminOtpSendSchema = z.object({
+  mobile: z.string().min(8).max(20).trim(),
+})
+
+export const tourAdminOtpVerifySchema = z.object({
+  mobile: z.string().min(8).max(20).trim(),
+  otp: z.string().min(4).max(8).trim(),
+})
+
+export const tourAdminFsMkdirSchema = z.object({
+  path: z.string().min(1, 'path is required').max(512).trim(),
+})

@@ -37,9 +37,20 @@ export function createRuntimeEnv(): Env {
     secretAccessKey,
   }
 
+  const adminBucketName = process.env.R2_ADMIN_BUCKET_NAME?.trim() || undefined
+  const adminBucket = adminBucketName
+    ? createS3R2Bucket({
+        accountId: r2Config.accountId,
+        bucketName: adminBucketName,
+        accessKeyId,
+        secretAccessKey,
+      })
+    : undefined
+
   return {
     DB: getSqliteHandle(),
     TOUR_BUCKET: createS3R2Bucket(r2Config),
+    ADMIN_BUCKET: adminBucket,
     R2_ACCESS_KEY_ID: accessKeyId,
     R2_SECRET_ACCESS_KEY: secretAccessKey,
     ENVIRONMENT: (process.env.ENVIRONMENT as Env['ENVIRONMENT']) ?? 'development',
@@ -47,6 +58,8 @@ export function createRuntimeEnv(): Env {
     CORS_ORIGIN: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
     R2_ACCOUNT_ID: r2Config.accountId,
     R2_BUCKET_NAME: r2Config.bucketName,
+    R2_ADMIN_BUCKET_NAME: adminBucketName,
+    R2_ADMIN_PUBLIC_DOMAIN: process.env.R2_ADMIN_PUBLIC_DOMAIN?.trim() || undefined,
     PART_SIZE_BYTES: process.env.PART_SIZE_BYTES ?? '26214400',
     UPLOAD_CONCURRENCY: process.env.UPLOAD_CONCURRENCY ?? '8',
     MAX_RETRIES: process.env.MAX_RETRIES ?? '3',
@@ -55,5 +68,8 @@ export function createRuntimeEnv(): Env {
     PROCESSOR_INGEST_URL: process.env.PROCESSOR_INGEST_URL,
     R2_PUBLIC_DOMAIN:
       process.env.R2_PUBLIC_DOMAIN ?? 'pub-97f4aa1642a4429982a8583c0cf894c0.r2.dev',
+    MSG91_AUTH_KEY: process.env.MSG91_AUTH_KEY || undefined,
+    TOUR_ADMIN_API_KEY: process.env.TOUR_ADMIN_API_KEY || undefined,
+    TOUR_ADMIN_CORS_ORIGINS: process.env.TOUR_ADMIN_CORS_ORIGINS?.trim() || undefined,
   }
 }

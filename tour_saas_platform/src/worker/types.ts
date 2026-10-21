@@ -18,6 +18,12 @@ export interface Env {
   /** R2 object storage bucket. Used for metadata operations. */
   TOUR_BUCKET: R2Bucket
 
+  /**
+   * Optional R2 bucket for tour_admin (and future) artifact packages.
+   * When unset, admin ingest returns 503 until configured.
+   */
+  ADMIN_BUCKET?: R2Bucket
+
   // ── Secrets (wrangler secret put) ────────────────────────
   /** R2 API token key — used to sign presigned part URLs. */
   R2_ACCESS_KEY_ID: string
@@ -37,6 +43,12 @@ export interface Env {
 
   /** R2 bucket name — must match your Cloudflare R2 bucket. */
   R2_BUCKET_NAME: string
+
+  /** Separate R2 bucket for tour admin ZIP packages. */
+  R2_ADMIN_BUCKET_NAME?: string
+
+  /** Public hostname for admin package links (custom domain; no protocol). */
+  R2_ADMIN_PUBLIC_DOMAIN?: string
 
   /** Multipart upload part size in bytes. Stored as string, parsed in code. */
   PART_SIZE_BYTES: string
@@ -61,6 +73,15 @@ export interface Env {
 
   /** Public hostname for tour viewer links (custom domain or r2.dev). */
   R2_PUBLIC_DOMAIN: string
+
+  /** MSG91 auth key — never store in settings DB. Optional until OTP is used. */
+  MSG91_AUTH_KEY?: string
+
+  /** Optional shared secret for /api/tour-admin/* partner calls. */
+  TOUR_ADMIN_API_KEY?: string
+
+  /** Comma-separated extra CORS origins allowed on /api/tour-admin/* */
+  TOUR_ADMIN_CORS_ORIGINS?: string
 }
 
 /**
@@ -73,6 +94,8 @@ export interface Variables {
   sessionId: string
   userRoles: string[]
   userPermissions: Set<string>
+  tourAdminId?: string
+  tourAdminTourId?: string
 }
 
 // ── Database row types ───────────────────────────────────────

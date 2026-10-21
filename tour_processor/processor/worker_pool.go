@@ -89,8 +89,10 @@ func RunWorkerPool(
 			case <-ticker.C:
 				cf := int(atomic.LoadInt64(&fileCounter))
 				cb := atomic.LoadInt64(&byteCounter)
-				if err := workerClient.Progress(tourID, cf, int(totalFiles), cb, totalBytes, progressStage); err != nil {
-					log.Printf("[pool] progress ping failed (non-fatal): %v", err)
+				if workerClient != nil {
+					if err := workerClient.Progress(tourID, cf, int(totalFiles), cb, totalBytes, progressStage); err != nil {
+						log.Printf("[pool] progress ping failed (non-fatal): %v", err)
+					}
 				}
 			}
 		}

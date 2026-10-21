@@ -27,6 +27,11 @@ import type {
   PropertyCategory,
   PropertyCategoryTreeNode,
   PropertyCategoryInput,
+  SettingsMap,
+  TourAdminMaster,
+  TourAdminMasterTemplate,
+  TourAdmin,
+  TourAdminListResponse,
 } from '../types'
 
 /** NDJSON progress events from DELETE /api/tours/:id */
@@ -124,6 +129,39 @@ export const api = {
       }>('/tours/form-options'),
 
     get: (id: string) => request<Tour>(`/tours/${id}`),
+
+    tourAdmin: {
+      get: (tourId: string) => request<TourAdminListResponse>(`/tours/${tourId}/tour-admin`),
+      put: (
+        tourId: string,
+        payload: {
+          id?: string
+          username: string
+          password?: string | null
+          country_code?: string
+          mobile?: string | null
+          password_enabled?: boolean
+          otp_enabled?: boolean
+          is_active?: boolean
+        },
+      ) =>
+        request<TourAdmin>(`/tours/${tourId}/tour-admin`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        }),
+      delete: (tourId: string, adminId: string) =>
+        request<{ message: string }>(`/tours/${tourId}/tour-admin/${adminId}`, {
+          method: 'DELETE',
+        }),
+      resetPassword: (tourId: string, password?: string | null, adminId?: string) =>
+        request<{ admin: TourAdmin; generated_password?: string }>(
+          `/tours/${tourId}/tour-admin/reset-password`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ password: password ?? null, id: adminId }),
+          },
+        ),
+    },
 
     /** Per-ZIP upload / processing history (all attempts). */
     history: (id: string) =>
@@ -330,6 +368,126 @@ export const api = {
       ),
   },
 
+  /** Tour admin (and future) artifact ZIP ingest — does not change tours.status. */
+  artifacts: {
+    tourAdmin: {
+      initiate: (
+        tourId: string,
+        payload: { filename: string; fileSize: number; saveBackupZip?: boolean },
+      ) =>
+        request<{
+          sessionId: string
+          chunkSizeBytes: number
+          totalChunks: number
+          backupVersion: string
+          artifactType: string
+        }>(`/tours/${tourId}/artifacts/tour_admin/ingest/initiate`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        }),
+
+      status: (tourId: string) =>
+        request<{
+          sessionId: string | null
+          bytesReceived: number
+          fileSize?: number
+          chunkSize?: number
+          receivedChunks: number[]
+          missingChunks: number[]
+          assembled: boolean
+          totalChunks?: number
+          artifactStatus?: string | null
+          publishUrl?: string | null
+        }>(`/tours/${tourId}/artifacts/tour_admin/ingest/status`),
+
+      complete: (tourId: string) =>
+        request<{ message: string; assembled?: boolean; enqueued?: boolean }>(
+          `/tours/${tourId}/artifacts/tour_admin/ingest/complete`,
+          { method: 'POST' },
+        ),
+
+      abort: (tourId: string) =>
+        request<{ message: string }>(`/tours/${tourId}/artifacts/tour_admin/ingest/abort`, {
+          method: 'POST',
+        }),
+
+      history: (tourId: string) =>
+        request<{
+          tourId: string
+          artifactType: string
+          history: TourUploadHistoryEntry[]
+        }>(`/tours/${tourId}/artifacts/tour_admin/history`),
+
+      publishInfo: (tourId: string) =>
+        request<{
+          tourId: string
+          artifactType: string
+          publishUrl: string | null
+          status: string | null
+          lastSuccessAt: string | null
+          lastUploadAt: string | null
+          backupKey: string | null
+          backupVersion: string | null
+          publicDomain: string | null
+        }>(`/tours/${tourId}/artifacts/tour_admin/publish-info`),
+
+      putChunk: (
+        tourId: string,
+        sessionId: string,
+        chunkNumber: number,
+        chunk: Blob,
+        onBytes?: (loaded: number) => void,
+        signal?: AbortSignal,
+      ): Promise<{ bytesReceived: number; receivedChunks: number[] }> =>
+        new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          xhr.open('PUT', `/api/tours/${tourId}/artifacts/tour_admin/ingest/chunk`)
+          xhr.withCredentials = true
+          xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+          xhr.setRequestHeader('X-Session-Id', sessionId)
+          xhr.setRequestHeader('X-Chunk-Number', String(chunkNumber))
+
+          const fail = (message: string) => reject(new Error(message))
+
+          if (signal) {
+            if (signal.aborted) {
+              reject(new DOMException('Aborted', 'AbortError'))
+              return
+            }
+            signal.addEventListener('abort', () => xhr.abort(), { once: true })
+          }
+
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) onBytes?.(event.loaded)
+          }
+          xhr.onerror = () => fail(`Network error uploading chunk ${chunkNumber}`)
+          xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'))
+          xhr.onload = () => {
+            let data: {
+              success?: boolean
+              error?: { message?: string }
+              data?: { bytesReceived: number; receivedChunks: number[] }
+            } | null = null
+            try {
+              data = JSON.parse(xhr.responseText) as {
+                success?: boolean
+                error?: { message?: string }
+                data?: { bytesReceived: number; receivedChunks: number[] }
+              }
+            } catch {
+              /* ignore */
+            }
+            if (xhr.status >= 200 && xhr.status < 300 && data?.success && data.data) {
+              resolve(data.data)
+              return
+            }
+            fail(data?.error?.message ?? `Chunk ${chunkNumber} failed (HTTP ${xhr.status})`)
+          }
+          xhr.send(chunk)
+        }),
+    },
+  },
+
   /** Go-first chunked ingest (primary upload path). */
   ingest: {
     initiate: (
@@ -498,6 +656,80 @@ export const api = {
         request<{ message: string }>(`/system/users/${id}`, {
           method: 'DELETE',
         }),
+    },
+
+    // ── Platform settings ────────────────────────────────────
+    settings: {
+      get: () => request<SettingsMap>('/system/settings'),
+      patch: (payload: Record<string, unknown> & { tab: 'general' | 'sms' }) =>
+        request<SettingsMap>('/system/settings', {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        }),
+    },
+
+    tourAdminMaster: {
+      get: () => request<TourAdminMaster>('/system/tour-admin-master'),
+      put: (payload: {
+        auto_create_on_tour_create?: boolean
+        password_enabled_default?: boolean
+        otp_enabled_default?: boolean
+        default_username_pattern?: string
+        password_mode?: 'random' | 'fixed'
+        default_password?: string | null
+        default_country_code?: string
+        default_mobile?: string | null
+        is_active_default?: boolean
+      }) =>
+        request<TourAdminMaster>('/system/tour-admin-master', {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        }),
+      templates: {
+        list: () =>
+          request<TourAdminMasterTemplate[]>('/system/tour-admin-master/templates'),
+        get: (id: string) =>
+          request<TourAdminMasterTemplate>(`/system/tour-admin-master/templates/${id}`),
+        create: (payload: {
+          label: string
+          username_pattern: string
+          password_mode: 'random' | 'fixed'
+          password?: string | null
+          country_code?: string
+          mobile?: string | null
+          password_enabled?: boolean
+          otp_enabled?: boolean
+          is_active?: boolean
+          sort_order?: number
+        }) =>
+          request<TourAdminMasterTemplate>('/system/tour-admin-master/templates', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          }),
+        update: (
+          id: string,
+          payload: {
+            label: string
+            username_pattern: string
+            password_mode: 'random' | 'fixed'
+            password?: string | null
+            country_code?: string
+            mobile?: string | null
+            password_enabled?: boolean
+            otp_enabled?: boolean
+            is_active?: boolean
+            sort_order?: number
+          },
+        ) =>
+          request<TourAdminMasterTemplate>(`/system/tour-admin-master/templates/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+          }),
+        delete: (id: string) =>
+          request<{ message: string }>(`/system/tour-admin-master/templates/${id}`, {
+            method: 'DELETE',
+          }),
+      },
     },
 
     // ── Property classification masters (recursive) ──────────

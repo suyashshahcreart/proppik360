@@ -65,6 +65,20 @@ export function requirePermission(permission: string) {
   })
 }
 
+/** Require at least one of the listed permissions. */
+export function requireAnyPermission(...permissions: string[]) {
+  return createMiddleware<{
+    Bindings: Env
+    Variables: Variables
+  }>(async (c, next) => {
+    const perms = c.get('userPermissions')
+    if (!perms || !permissions.some((p) => perms.has(p))) {
+      return c.json(err('FORBIDDEN', 'Insufficient permissions'), 403)
+    }
+    await next()
+  })
+}
+
 // ── requireNotCustomer ────────────────────────────────────────
 /**
  * Blocks access if the user's ONLY role is 'customer'.

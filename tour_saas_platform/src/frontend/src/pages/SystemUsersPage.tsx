@@ -12,6 +12,7 @@ import { RowActions } from '@/components/shared/RowActions'
 import { useListControls } from '@/hooks/useListControls'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
@@ -292,8 +293,7 @@ export function SystemUsersPage() {
                 required={modalMode === 'create'}
                 hint={modalMode === 'edit' ? 'Leave blank to keep current' : undefined}
               >
-                <Input
-                  type="password"
+                <PasswordInput
                   value={form.password}
                   onChange={(e) => setField('password', e.target.value)}
                   required={modalMode === 'create'}

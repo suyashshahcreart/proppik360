@@ -29,6 +29,8 @@ export interface UploadProgress {
   error?: string
 }
 
+export type IngestArtifactType = 'tour_viewer' | 'tour_admin'
+
 export interface UploaderConfig {
   tourId: string
   file: File
@@ -43,6 +45,11 @@ export interface UploaderConfig {
   resumeR2Key?: string | null
   /** When true, Go uploads a timestamped ZIP copy to R2 after publish. */
   saveBackupZip?: boolean
+  /**
+   * Default tour_viewer (existing ingest APIs).
+   * tour_admin uses /artifacts/tour_admin/ingest/* and does not change tours.status.
+   */
+  artifactType?: IngestArtifactType
 }
 
 export function friendlyUploadError(message: string): string {
@@ -114,6 +121,7 @@ export class GoIngestUploader {
   private readonly config: UploaderConfig
   private readonly concurrency: number
   private readonly maxRetries: number
+  private readonly artifactType: IngestArtifactType
 
   private uploadId: string | null = null
   private partSizeBytes = DEFAULT_PART_SIZE
@@ -131,6 +139,11 @@ export class GoIngestUploader {
     this.config = config
     this.concurrency = config.concurrency ?? 8
     this.maxRetries = config.maxRetries ?? RETRY_DELAYS_MS.length
+    this.artifactType = config.artifactType ?? 'tour_viewer'
+  }
+
+  private get isAdminArtifact() {
+    return this.artifactType === 'tour_admin'
   }
 
   async start(): Promise<void> {
@@ -177,7 +190,11 @@ export class GoIngestUploader {
 
     if (this.uploadId) {
       try {
-        await api.ingest.abort(this.config.tourId)
+        if (this.isAdminArtifact) {
+          await api.artifacts.tourAdmin.abort(this.config.tourId)
+        } else {
+          await api.ingest.abort(this.config.tourId)
+        }
       } catch {
         // Upload may already be finalized or gone
       }
@@ -195,17 +212,23 @@ export class GoIngestUploader {
     const resumeUploadId = this.config.resumeUploadId
     const resumeR2Key = this.config.resumeR2Key
 
-    if (resumeUploadId && resumeR2Key) {
+    if (resumeUploadId && resumeR2Key && !this.isAdminArtifact) {
       this.uploadId = resumeUploadId
       this.partSizeBytes = DEFAULT_PART_SIZE
       this.totalParts = Math.ceil(totalBytes / this.partSizeBytes)
       await this.syncPartsFromServer(signal)
     } else {
-      const initData = await api.ingest.initiate(this.config.tourId, {
-        filename: this.config.file.name,
-        fileSize: totalBytes,
-        saveBackupZip: this.config.saveBackupZip === true,
-      })
+      const initData = this.isAdminArtifact
+        ? await api.artifacts.tourAdmin.initiate(this.config.tourId, {
+            filename: this.config.file.name,
+            fileSize: totalBytes,
+            saveBackupZip: this.config.saveBackupZip === true,
+          })
+        : await api.ingest.initiate(this.config.tourId, {
+            filename: this.config.file.name,
+            fileSize: totalBytes,
+            saveBackupZip: this.config.saveBackupZip === true,
+          })
 
       this.uploadId = initData.sessionId
       this.partSizeBytes = initData.chunkSizeBytes
@@ -218,7 +241,9 @@ export class GoIngestUploader {
     if (this.aborted) return
 
     this.emitProgress('completing')
-    const completeResult = await api.ingest.complete(this.config.tourId)
+    const completeResult = this.isAdminArtifact
+      ? await api.artifacts.tourAdmin.complete(this.config.tourId)
+      : await api.ingest.complete(this.config.tourId)
     this.emitProgress('done')
     this.config.onComplete()
 
@@ -234,7 +259,9 @@ export class GoIngestUploader {
 
     signal?.throwIfAborted()
 
-    const status = await api.ingest.status(this.config.tourId)
+    const status = this.isAdminArtifact
+      ? await api.artifacts.tourAdmin.status(this.config.tourId)
+      : await api.ingest.status(this.config.tourId)
     if (status.chunkSize && status.chunkSize > 0) this.partSizeBytes = status.chunkSize
     if (status.totalChunks && status.totalChunks > 0) this.totalParts = status.totalChunks
     if (status.fileSize && status.fileSize > 0 && status.fileSize !== this.config.file.size) {
@@ -305,7 +332,10 @@ export class GoIngestUploader {
     const chunkSize = end - start
 
     try {
-      await api.ingest.putChunk(
+      const putChunk = this.isAdminArtifact
+        ? api.artifacts.tourAdmin.putChunk
+        : api.ingest.putChunk
+      await putChunk(
         this.config.tourId,
         this.uploadId!,
         partNumber,

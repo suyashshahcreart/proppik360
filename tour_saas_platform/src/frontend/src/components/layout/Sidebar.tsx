@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { Aperture, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import type { User } from '@/types'
-import { can } from '@/components/shared/PermissionGate'
+import { can, canAny } from '@/components/shared/PermissionGate'
 import { cn } from '@/lib/utils'
 import { NAV_SECTIONS } from './nav-config'
 
@@ -32,7 +32,11 @@ export function Sidebar({ user, collapsed, onToggleCollapsed, onNavigate }: Side
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto scrollbar-thin px-2.5 py-2">
         {NAV_SECTIONS.map((section, idx) => {
-          const visibleItems = section.items.filter((item) => can(user, item.permission))
+          const visibleItems = section.items.filter((item) =>
+            item.anyOf?.length
+              ? canAny(user, item.anyOf) || can(user, item.permission)
+              : can(user, item.permission),
+          )
           if (visibleItems.length === 0) return null
 
           return (

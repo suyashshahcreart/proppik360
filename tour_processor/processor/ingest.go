@@ -10,9 +10,26 @@ import (
 	"sync"
 )
 
+// ArtifactTourViewer is the default ingest artifact (existing tour ZIP path).
+const ArtifactTourViewer = "tour_viewer"
+
+// ArtifactTourAdmin is the per-tour admin package ZIP.
+const ArtifactTourAdmin = "tour_admin"
+
+// IngestSessionKey returns the on-disk session key for a tour + artifact.
+// Viewer keeps the legacy tourId-only paths for backward compatibility.
+func IngestSessionKey(tourID, artifactType string) string {
+	if artifactType == "" || artifactType == ArtifactTourViewer {
+		return tourID
+	}
+	return tourID + "__" + artifactType
+}
+
 // IngestSession is one chunked ZIP upload held on the Go temp disk.
 type IngestSession struct {
 	TourID         string `json:"tourId"`
+	ArtifactType   string `json:"artifactType,omitempty"`
+	SessionKey     string `json:"sessionKey,omitempty"` // on-disk key; defaults to TourID for viewer
 	SessionID      string `json:"sessionId"`
 	Filename       string `json:"filename"`
 	FileSize       int64  `json:"fileSize"`
@@ -33,6 +50,13 @@ type IngestSession struct {
 	DirectWrite bool `json:"directWrite,omitempty"`
 }
 
+func (sess *IngestSession) resolveSessionKey() string {
+	if sess.SessionKey != "" {
+		return sess.SessionKey
+	}
+	return IngestSessionKey(sess.TourID, sess.ArtifactType)
+}
+
 // IngestStore persists chunked uploads under the processor temp directory.
 type IngestStore struct {
 	tempDir  string
@@ -47,20 +71,24 @@ func NewIngestStore(tempDir string) *IngestStore {
 	}
 }
 
-func (s *IngestStore) sessionPath(tourID string) string {
-	return filepath.Join(s.tempDir, "sessions", tourID+".json")
+func (s *IngestStore) sessionPath(sessionKey string) string {
+	return filepath.Join(s.tempDir, "sessions", sessionKey+".json")
 }
 
-func (s *IngestStore) chunkDir(tourID string) string {
-	return filepath.Join(s.tempDir, "ingest", tourID)
+func (s *IngestStore) chunkDir(sessionKey string) string {
+	return filepath.Join(s.tempDir, "ingest", sessionKey)
 }
 
-func (s *IngestStore) chunkPath(tourID string, n int) string {
-	return filepath.Join(s.chunkDir(tourID), fmt.Sprintf("part-%05d", n))
+func (s *IngestStore) chunkPath(sessionKey string, n int) string {
+	return filepath.Join(s.chunkDir(sessionKey), fmt.Sprintf("part-%05d", n))
 }
 
-func (s *IngestStore) publishedListPath(tourID string) string {
-	return filepath.Join(s.chunkDir(tourID), "published.list")
+func (s *IngestStore) publishedListPath(sessionKey string) string {
+	return filepath.Join(s.chunkDir(sessionKey), "published.list")
+}
+
+func (s *IngestStore) zipFilePath(sessionKey string) string {
+	return filepath.Join(s.tempDir, sessionKey+".zip")
 }
 
 // tourLock returns (and lazily creates) the per-tour metadata mutex.
@@ -86,19 +114,24 @@ func (s *IngestStore) Init(sess IngestSession) (*IngestSession, error) {
 	if sess.TourID == "" || sess.TotalChunks <= 0 || sess.FileSize <= 0 || sess.ChunkSize <= 0 {
 		return nil, fmt.Errorf("invalid ingest session")
 	}
+	if sess.ArtifactType == "" {
+		sess.ArtifactType = ArtifactTourViewer
+	}
+	sess.SessionKey = IngestSessionKey(sess.TourID, sess.ArtifactType)
+	key := sess.SessionKey
 
-	tl := s.tourLock(sess.TourID)
+	tl := s.tourLock(key)
 	tl.Lock()
 	defer tl.Unlock()
 
-	// Wipe any leftover artifacts from a prior attempt for this tour.
-	os.RemoveAll(s.chunkDir(sess.TourID))
-	os.Remove(filepath.Join(s.tempDir, sess.TourID+".zip"))
+	// Wipe any leftover artifacts from a prior attempt for this session key.
+	os.RemoveAll(s.chunkDir(key))
+	os.Remove(s.zipFilePath(key))
 
-	if err := os.MkdirAll(s.chunkDir(sess.TourID), 0o755); err != nil {
+	if err := os.MkdirAll(s.chunkDir(key), 0o755); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.sessionPath(sess.TourID)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.sessionPath(key)), 0o755); err != nil {
 		return nil, err
 	}
 
@@ -108,7 +141,7 @@ func (s *IngestStore) Init(sess IngestSession) (*IngestSession, error) {
 	sess.PublishDone = false
 	sess.BackupVerified = false
 	sess.DirectWrite = true
-	sess.ZipPath = filepath.Join(s.tempDir, sess.TourID+".zip")
+	sess.ZipPath = s.zipFilePath(key)
 
 	// Pre-allocate the final ZIP so parallel WriteAt calls land at fixed offsets.
 	f, err := os.OpenFile(sess.ZipPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
@@ -135,10 +168,10 @@ func (s *IngestStore) Init(sess IngestSession) (*IngestSession, error) {
 // WriteChunk stores part n (1-based). For DirectWrite sessions the bytes go
 // straight into ZipPath at (n-1)*ChunkSize. I/O runs outside the tour lock so
 // multiple chunks can land in parallel. Legacy part-file sessions still work.
-func (s *IngestStore) WriteChunk(tourID string, n int, r io.Reader) (*IngestSession, error) {
-	tl := s.tourLock(tourID)
+func (s *IngestStore) WriteChunk(sessionKey string, n int, r io.Reader) (*IngestSession, error) {
+	tl := s.tourLock(sessionKey)
 	tl.Lock()
-	sess, err := s.loadLocked(tourID)
+	sess, err := s.loadLocked(sessionKey)
 	if err != nil {
 		tl.Unlock()
 		return nil, err
@@ -156,7 +189,7 @@ func (s *IngestStore) WriteChunk(tourID string, n int, r io.Reader) (*IngestSess
 	zipPath := sess.ZipPath
 	chunkSize := sess.ChunkSize
 	fileSize := sess.FileSize
-	partPath := s.chunkPath(tourID, n)
+	partPath := s.chunkPath(sessionKey, n)
 	// Snapshot for I/O; release lock before slow disk/network copy.
 	tl.Unlock()
 
@@ -174,7 +207,7 @@ func (s *IngestStore) WriteChunk(tourID string, n int, r io.Reader) (*IngestSess
 	defer tl.Unlock()
 
 	// Reload — other chunks may have updated Received[] while we wrote.
-	sess, err = s.loadLocked(tourID)
+	sess, err = s.loadLocked(sessionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +307,7 @@ func (s *IngestStore) hasLegacyPartsLocked(sess *IngestSession) bool {
 		return false
 	}
 	// Probe first part — if present, this is an old part-file session.
-	_, err := os.Stat(s.chunkPath(sess.TourID, 1))
+	_, err := os.Stat(s.chunkPath(sess.resolveSessionKey(), 1))
 	return err == nil
 }
 
@@ -299,7 +332,7 @@ func (s *IngestStore) sumReceivedBytesLocked(sess *IngestSession) int64 {
 		if !sess.Received[i-1] {
 			continue
 		}
-		fi, err := os.Stat(s.chunkPath(sess.TourID, i))
+		fi, err := os.Stat(s.chunkPath(sess.resolveSessionKey(), i))
 		if err != nil {
 			continue
 		}
@@ -309,11 +342,11 @@ func (s *IngestStore) sumReceivedBytesLocked(sess *IngestSession) int64 {
 }
 
 // Status returns the session and the 1-based chunk numbers still missing.
-func (s *IngestStore) Status(tourID string) (*IngestSession, []int, error) {
-	tl := s.tourLock(tourID)
+func (s *IngestStore) Status(sessionKey string) (*IngestSession, []int, error) {
+	tl := s.tourLock(sessionKey)
 	tl.Lock()
 	defer tl.Unlock()
-	sess, err := s.loadLocked(tourID)
+	sess, err := s.loadLocked(sessionKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -328,12 +361,12 @@ func (s *IngestStore) Status(tourID string) (*IngestSession, []int, error) {
 
 // Assemble finalizes the ZIP. DirectWrite sessions only verify size (fast).
 // Legacy part-file sessions still concatenate into ZipPath.
-func (s *IngestStore) Assemble(tourID string) (*IngestSession, error) {
-	tl := s.tourLock(tourID)
+func (s *IngestStore) Assemble(sessionKey string) (*IngestSession, error) {
+	tl := s.tourLock(sessionKey)
 	tl.Lock()
 	defer tl.Unlock()
 
-	sess, err := s.loadLocked(tourID)
+	sess, err := s.loadLocked(sessionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -394,13 +427,14 @@ func checkZipMagic(path string) error {
 }
 
 func (s *IngestStore) assembleLegacyLocked(sess *IngestSession) (*IngestSession, error) {
+	key := sess.resolveSessionKey()
 	dest, err := os.Create(sess.ZipPath)
 	if err != nil {
 		return nil, err
 	}
 	var total int64
 	for i := 1; i <= sess.TotalChunks; i++ {
-		part, err := os.Open(s.chunkPath(sess.TourID, i))
+		part, err := os.Open(s.chunkPath(key, i))
 		if err != nil {
 			dest.Close()
 			return nil, err
@@ -422,7 +456,7 @@ func (s *IngestStore) assembleLegacyLocked(sess *IngestSession) (*IngestSession,
 	}
 	// Drop part files after successful concat to free disk.
 	for i := 1; i <= sess.TotalChunks; i++ {
-		os.Remove(s.chunkPath(sess.TourID, i))
+		os.Remove(s.chunkPath(key, i))
 	}
 	sess.Assembled = true
 	sess.BytesReceived = total
@@ -433,45 +467,46 @@ func (s *IngestStore) assembleLegacyLocked(sess *IngestSession) (*IngestSession,
 }
 
 // Abort removes chunks, the assembled ZIP, and the session file.
-func (s *IngestStore) Abort(tourID string) error {
-	tl := s.tourLock(tourID)
+func (s *IngestStore) Abort(sessionKey string) error {
+	tl := s.tourLock(sessionKey)
 	tl.Lock()
-	sess, err := s.loadLocked(tourID)
+	sess, err := s.loadLocked(sessionKey)
 	zipPath := ""
 	if err == nil && sess != nil {
 		zipPath = sess.ZipPath
 	}
-	os.RemoveAll(s.chunkDir(tourID))
+	os.RemoveAll(s.chunkDir(sessionKey))
 	if zipPath != "" {
 		os.Remove(zipPath)
 	} else {
-		os.Remove(filepath.Join(s.tempDir, tourID+".zip"))
+		os.Remove(s.zipFilePath(sessionKey))
 	}
-	os.Remove(s.sessionPath(tourID))
+	os.Remove(s.sessionPath(sessionKey))
 	tl.Unlock()
-	s.dropTourLock(tourID)
+	s.dropTourLock(sessionKey)
 	return nil
 }
 
 // Load returns a session if one exists on disk.
-func (s *IngestStore) Load(tourID string) (*IngestSession, error) {
-	tl := s.tourLock(tourID)
+func (s *IngestStore) Load(sessionKey string) (*IngestSession, error) {
+	tl := s.tourLock(sessionKey)
 	tl.Lock()
 	defer tl.Unlock()
-	return s.loadLocked(tourID)
+	return s.loadLocked(sessionKey)
 }
 
 // Update persists caller mutations (publish/backup flags, backup key).
 func (s *IngestStore) Update(sess *IngestSession) error {
-	tl := s.tourLock(sess.TourID)
+	key := sess.resolveSessionKey()
+	tl := s.tourLock(key)
 	tl.Lock()
 	defer tl.Unlock()
 	return s.saveLocked(sess)
 }
 
 // LoadPublished returns relative paths already uploaded for this session.
-func (s *IngestStore) LoadPublished(tourID string) (map[string]struct{}, error) {
-	data, err := os.ReadFile(s.publishedListPath(tourID))
+func (s *IngestStore) LoadPublished(sessionKey string) (map[string]struct{}, error) {
+	data, err := os.ReadFile(s.publishedListPath(sessionKey))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]struct{}{}, nil
@@ -493,11 +528,11 @@ func (s *IngestStore) LoadPublished(tourID string) (map[string]struct{}, error) 
 }
 
 // MarkPublished appends one relative path to the local checkpoint.
-func (s *IngestStore) MarkPublished(tourID, rel string) error {
-	if err := os.MkdirAll(s.chunkDir(tourID), 0o755); err != nil {
+func (s *IngestStore) MarkPublished(sessionKey, rel string) error {
+	if err := os.MkdirAll(s.chunkDir(sessionKey), 0o755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(s.publishedListPath(tourID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(s.publishedListPath(sessionKey), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
 	}
@@ -508,34 +543,37 @@ func (s *IngestStore) MarkPublished(tourID, rel string) error {
 
 // CleanupSessionFiles removes ingest artifacts after a verified backup.
 // The caller must have confirmed the backup object first.
-func (s *IngestStore) CleanupSessionFiles(tourID string) error {
-	tl := s.tourLock(tourID)
+func (s *IngestStore) CleanupSessionFiles(sessionKey string) error {
+	tl := s.tourLock(sessionKey)
 	tl.Lock()
-	sess, err := s.loadLocked(tourID)
+	sess, err := s.loadLocked(sessionKey)
 	if err == nil && sess != nil && sess.ZipPath != "" {
 		os.Remove(sess.ZipPath)
 	}
-	os.Remove(filepath.Join(s.tempDir, tourID+".zip"))
-	os.RemoveAll(s.chunkDir(tourID))
+	os.Remove(s.zipFilePath(sessionKey))
+	os.RemoveAll(s.chunkDir(sessionKey))
 	// Multipart staging files created for large ZIP entries.
-	matches, _ := filepath.Glob(filepath.Join(s.tempDir, sanitizeTempPrefix(tourID)+"-r2upload-*.tmp"))
+	matches, _ := filepath.Glob(filepath.Join(s.tempDir, sanitizeTempPrefix(sessionKey)+"-r2upload-*.tmp"))
 	for _, m := range matches {
 		os.Remove(m)
 	}
-	os.Remove(s.sessionPath(tourID))
+	os.Remove(s.sessionPath(sessionKey))
 	tl.Unlock()
-	s.dropTourLock(tourID)
+	s.dropTourLock(sessionKey)
 	return nil
 }
 
-func (s *IngestStore) loadLocked(tourID string) (*IngestSession, error) {
-	data, err := os.ReadFile(s.sessionPath(tourID))
+func (s *IngestStore) loadLocked(sessionKey string) (*IngestSession, error) {
+	data, err := os.ReadFile(s.sessionPath(sessionKey))
 	if err != nil {
 		return nil, err
 	}
 	var sess IngestSession
 	if err := json.Unmarshal(data, &sess); err != nil {
 		return nil, err
+	}
+	if sess.SessionKey == "" {
+		sess.SessionKey = sessionKey
 	}
 	if len(sess.Received) != sess.TotalChunks && sess.TotalChunks > 0 {
 		resized := make([]bool, sess.TotalChunks)
@@ -546,14 +584,15 @@ func (s *IngestStore) loadLocked(tourID string) (*IngestSession, error) {
 }
 
 func (s *IngestStore) saveLocked(sess *IngestSession) error {
-	if err := os.MkdirAll(filepath.Dir(s.sessionPath(sess.TourID)), 0o755); err != nil {
+	key := sess.resolveSessionKey()
+	if err := os.MkdirAll(filepath.Dir(s.sessionPath(key)), 0o755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(sess, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.sessionPath(sess.TourID), data, 0o644)
+	return os.WriteFile(s.sessionPath(key), data, 0o644)
 }
 
 // ReceivedNumbers returns 1-based chunk indexes that are present.

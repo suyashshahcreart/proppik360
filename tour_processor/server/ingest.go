@@ -11,6 +11,17 @@ import (
 	"tour-processor/processor"
 )
 
+func artifactFromRequest(r *http.Request, bodyArtifact string) string {
+	q := strings.TrimSpace(r.URL.Query().Get("artifact"))
+	if q != "" {
+		return q
+	}
+	if strings.TrimSpace(bodyArtifact) != "" {
+		return strings.TrimSpace(bodyArtifact)
+	}
+	return processor.ArtifactTourViewer
+}
+
 func (s *Server) authorized(w http.ResponseWriter, r *http.Request) bool {
 	secret := r.Header.Get("X-Processor-Secret")
 	if secret == "" || secret != s.secret {
@@ -33,13 +44,16 @@ func (s *Server) handleIngestInit(w http.ResponseWriter, r *http.Request) {
 		TotalChunks   int    `json:"totalChunks"`
 		BackupVersion string `json:"backupVersion"`
 		SaveBackupZip bool   `json:"saveBackupZip"`
+		ArtifactType  string `json:"artifactType"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || tourID == "" {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
+	artifact := artifactFromRequest(r, body.ArtifactType)
 	sess, err := s.ingest.Init(processor.IngestSession{
 		TourID:        tourID,
+		ArtifactType:  artifact,
 		SessionID:     body.SessionID,
 		Filename:      body.Filename,
 		FileSize:      body.FileSize,
@@ -53,10 +67,11 @@ func (s *Server) handleIngestInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"tourId":      sess.TourID,
-		"sessionId":   sess.SessionID,
-		"totalChunks": sess.TotalChunks,
-		"zipPath":     sess.ZipPath,
+		"tourId":       sess.TourID,
+		"sessionId":    sess.SessionID,
+		"totalChunks":  sess.TotalChunks,
+		"zipPath":      sess.ZipPath,
+		"artifactType": sess.ArtifactType,
 	})
 }
 
@@ -65,12 +80,14 @@ func (s *Server) handleIngestChunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tourID := strings.TrimSpace(r.PathValue("tourId"))
+	artifact := artifactFromRequest(r, "")
+	key := processor.IngestSessionKey(tourID, artifact)
 	n, err := strconv.Atoi(r.PathValue("n"))
 	if err != nil || n < 1 {
 		http.Error(w, "invalid chunk number", http.StatusBadRequest)
 		return
 	}
-	sess, err := s.ingest.WriteChunk(tourID, n, r.Body)
+	sess, err := s.ingest.WriteChunk(key, n, r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -86,21 +103,42 @@ func (s *Server) handleIngestComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tourID := strings.TrimSpace(r.PathValue("tourId"))
-	sess, err := s.ingest.Assemble(tourID)
+	var body struct {
+		ArtifactType string `json:"artifactType"`
+		Phase        string `json:"phase"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	artifact := artifactFromRequest(r, body.ArtifactType)
+	key := processor.IngestSessionKey(tourID, artifact)
+
+	sess, err := s.ingest.Assemble(key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	enqueued := s.jobQueue.Enqueue(tourID)
+
+	phase := strings.TrimSpace(body.Phase)
+	if phase == "" && artifact == processor.ArtifactTourAdmin {
+		phase = "publish_admin"
+	}
+
+	var enqueued bool
+	if artifact == processor.ArtifactTourAdmin {
+		enqueued = s.jobQueue.EnqueueArtifact(tourID, artifact, phase)
+	} else {
+		enqueued = s.jobQueue.Enqueue(tourID)
+	}
+
 	mode := "direct"
 	if !sess.DirectWrite {
 		mode = "legacy-concat"
 	}
-	log.Printf("[server] Ingest complete tour=%s bytes=%d mode=%s enqueued=%v", tourID, sess.BytesReceived, mode, enqueued)
+	log.Printf("[server] Ingest complete tour=%s artifact=%s bytes=%d mode=%s enqueued=%v", tourID, artifact, sess.BytesReceived, mode, enqueued)
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"assembled": true,
-		"zipPath":   sess.ZipPath,
-		"enqueued":  enqueued,
+		"assembled":    true,
+		"zipPath":      sess.ZipPath,
+		"enqueued":     enqueued,
+		"artifactType": artifact,
 	})
 	_, _ = io.Copy(io.Discard, r.Body)
 }
@@ -110,7 +148,9 @@ func (s *Server) handleIngestStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tourID := strings.TrimSpace(r.PathValue("tourId"))
-	sess, missing, err := s.ingest.Status(tourID)
+	artifact := artifactFromRequest(r, "")
+	key := processor.IngestSessionKey(tourID, artifact)
+	sess, missing, err := s.ingest.Status(key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -127,6 +167,7 @@ func (s *Server) handleIngestStatus(w http.ResponseWriter, r *http.Request) {
 		"publishDone":    sess.PublishDone,
 		"backupVerified": sess.BackupVerified,
 		"backupKey":      sess.BackupKey,
+		"artifactType":   sess.ArtifactType,
 	})
 }
 
@@ -135,7 +176,13 @@ func (s *Server) handleIngestAbort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tourID := strings.TrimSpace(r.PathValue("tourId"))
-	if err := s.ingest.Abort(tourID); err != nil {
+	var body struct {
+		ArtifactType string `json:"artifactType"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	artifact := artifactFromRequest(r, body.ArtifactType)
+	key := processor.IngestSessionKey(tourID, artifact)
+	if err := s.ingest.Abort(key); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

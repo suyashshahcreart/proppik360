@@ -15,7 +15,7 @@
 // ============================================================
 import { Hono } from 'hono'
 import { createMiddleware } from 'hono/factory'
-import type { R2Config } from '../services/r2'
+import { getPresignedDownloadUrl, type R2Config } from '../services/r2'
 import { updateTour, updateTourProgress } from '../services/tours'
 import {
   appendUploadHistoryStage,
@@ -23,6 +23,19 @@ import {
   patchUploadHistoryBackup,
   patchUploadHistoryReady,
 } from '../services/tour-upload-history'
+import { ARTIFACT_TYPE_TOUR_ADMIN } from '../services/admin-paths'
+import {
+  appendArtifactUploadHistoryStage,
+  finalizeArtifactUploadHistory,
+  patchArtifactUploadHistoryBackup,
+  patchArtifactUploadHistoryReady,
+} from '../services/artifact-upload-history'
+import {
+  markTourArtifactCompleted,
+  markTourArtifactFailed,
+  markTourArtifactReady,
+  patchTourArtifactBackup,
+} from '../services/tour-artifacts'
 import {
   listPendingJobTours,
   reconcilePendingJobs,
@@ -34,6 +47,8 @@ import {
   getToursPathPrefix,
 } from '../utils/viewer-url'
 import type { Env, Variables } from '../types'
+
+const ARTIFACT_ADMIN = ARTIFACT_TYPE_TOUR_ADMIN
 
 const processor = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -383,33 +398,215 @@ processor.post('/tours/:tourId/completed', async (c) => {
   return c.json(ok({ message: 'Tour marked as completed' }))
 })
 
-// ── Presigned GET URL helper ──────────────────────────────────
-//
-// Generates a presigned URL for downloading (GET) a specific R2 object.
-// Uses the same AwsClient signing approach as getPresignedPartUrl,
-// but with method=GET instead of PUT.
-async function getPresignedDownloadUrl(
-  config: R2Config,
-  r2Key: string,
-): Promise<string> {
-  // Reuse the aws4fetch AwsClient signing from r2 service
-  const { AwsClient } = await import('aws4fetch')
-  const client = new AwsClient({
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
+// ── Artifact (tour_admin) callbacks — do NOT touch tours.status ─
+
+processor.post(`/artifacts/:tourId/${ARTIFACT_ADMIN}/complete`, async (c) => {
+  const tourId = c.req.param('tourId')
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json(err('INVALID_INPUT', 'Request body must be valid JSON'), 422)
+  }
+  const { publishUrl, layout, saveBackupZip } = body as {
+    publishUrl?: string
+    layout?: string
+    saveBackupZip?: boolean
+  }
+
+  const domain = c.env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
+  if (!domain && !publishUrl) {
+    return c.json(err('MISCONFIGURED', 'R2_ADMIN_PUBLIC_DOMAIN is not set'), 503)
+  }
+
+  const ready = await markTourArtifactReady(c.env.DB, {
+    tourId,
+    artifactType: ARTIFACT_ADMIN,
+    publicDomain: domain || 'localhost',
+    layout: layout ?? null,
+  })
+  const finalUrl = publishUrl || ready.publishUrl
+  const wantsBackup = Boolean(saveBackupZip)
+  const postReadyStage = wantsBackup ? 'ready_pending_backup' : 'cleanup'
+  const now = new Date().toISOString()
+
+  await c.env.DB
+    .prepare(
+      `UPDATE artifact_upload_sessions
+          SET stage = ?, updated_at = ?
+        WHERE tour_id = ? AND artifact_type = ? AND stage NOT IN ('aborted', 'completed')`,
+    )
+    .bind(postReadyStage, now, tourId, ARTIFACT_ADMIN)
+    .run()
+
+  await patchArtifactUploadHistoryReady(c.env.DB, tourId, ARTIFACT_ADMIN, {
+    publishUrl: finalUrl,
+    layout: layout ?? null,
+    stage: postReadyStage,
   })
 
-  const url = new URL(
-    `https://${config.accountId}.r2.cloudflarestorage.com/${config.bucketName}/${r2Key}`,
-  )
-  url.searchParams.set('X-Amz-Expires', '3600')
+  console.log(`[processor] Admin artifact ready: tour=${tourId} url=${finalUrl}`)
+  return c.json(ok({ message: 'Admin artifact marked ready', publishUrl: finalUrl }))
+})
 
-  const signed = await client.sign(
-    new Request(url.toString(), { method: 'GET' }),
-    { aws: { signQuery: true } },
-  )
+processor.post(`/artifacts/:tourId/${ARTIFACT_ADMIN}/progress`, async (c) => {
+  const tourId = c.req.param('tourId')
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json(err('INVALID_INPUT', 'Request body must be valid JSON'), 422)
+  }
+  const {
+    currentFiles,
+    totalFiles,
+    currentBytes,
+    totalBytes,
+    stage,
+  } = body as {
+    currentFiles?: number
+    totalFiles?: number
+    currentBytes?: number
+    totalBytes?: number
+    stage?: string
+  }
 
-  return signed.url
-}
+  if (
+    typeof currentFiles !== 'number' ||
+    typeof totalFiles !== 'number' ||
+    typeof currentBytes !== 'number' ||
+    typeof totalBytes !== 'number'
+  ) {
+    return c.json(
+      err('INVALID_INPUT', 'currentFiles, totalFiles, currentBytes, totalBytes are all required numbers'),
+      422,
+    )
+  }
+
+  if (typeof stage === 'string' && stage) {
+    await appendArtifactUploadHistoryStage(c.env.DB, tourId, ARTIFACT_ADMIN, stage, undefined, {
+      currentFiles,
+      totalFiles,
+      currentBytes,
+      totalBytes,
+    })
+    const now = new Date().toISOString()
+    await c.env.DB
+      .prepare(
+        `UPDATE artifact_upload_sessions
+            SET stage = ?, updated_at = ?
+          WHERE tour_id = ? AND artifact_type = ? AND stage NOT IN ('aborted', 'completed')`,
+      )
+      .bind(stage, now, tourId, ARTIFACT_ADMIN)
+      .run()
+  }
+
+  return c.json(ok({ message: 'Artifact progress updated' }))
+})
+
+processor.post(`/artifacts/:tourId/${ARTIFACT_ADMIN}/fail`, async (c) => {
+  const tourId = c.req.param('tourId')
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json(err('INVALID_INPUT', 'Request body must be valid JSON'), 422)
+  }
+  const { error: errorMsg } = body as { error?: string }
+  if (!errorMsg || typeof errorMsg !== 'string') {
+    return c.json(err('INVALID_INPUT', 'error message is required'), 422)
+  }
+
+  const now = new Date().toISOString()
+  await c.env.DB
+    .prepare(
+      `UPDATE artifact_upload_sessions
+          SET stage = 'failed', error = ?, updated_at = ?
+        WHERE tour_id = ? AND artifact_type = ? AND stage NOT IN ('aborted', 'completed')`,
+    )
+    .bind(errorMsg, now, tourId, ARTIFACT_ADMIN)
+    .run()
+
+  await markTourArtifactFailed(c.env.DB, tourId, ARTIFACT_ADMIN)
+  await finalizeArtifactUploadHistory(c.env.DB, {
+    tourId,
+    artifactType: ARTIFACT_ADMIN,
+    status: 'failed',
+    stage: 'failed',
+    errorMessage: errorMsg,
+  })
+
+  console.error(`[processor] Admin artifact failed: tour=${tourId} error=${errorMsg}`)
+  return c.json(ok({ message: 'Admin artifact marked as failed' }))
+})
+
+processor.post(`/artifacts/:tourId/${ARTIFACT_ADMIN}/backup-complete`, async (c) => {
+  const tourId = c.req.param('tourId')
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json(err('INVALID_INPUT', 'Request body must be valid JSON'), 422)
+  }
+  const { backupKey, version } = body as { backupKey?: string; version?: string }
+  if (!backupKey) {
+    return c.json(err('INVALID_INPUT', 'backupKey is required'), 422)
+  }
+  const now = new Date().toISOString()
+  await c.env.DB
+    .prepare(
+      `UPDATE artifact_upload_sessions
+          SET backup_r2_key = ?,
+              backup_version = COALESCE(?, backup_version),
+              stage = 'cleanup',
+              updated_at = ?
+        WHERE tour_id = ? AND artifact_type = ? AND stage NOT IN ('aborted')`,
+    )
+    .bind(backupKey, version ?? null, now, tourId, ARTIFACT_ADMIN)
+    .run()
+  await patchTourArtifactBackup(c.env.DB, tourId, ARTIFACT_ADMIN, backupKey, version ?? null)
+  await patchArtifactUploadHistoryBackup(c.env.DB, tourId, ARTIFACT_ADMIN, backupKey, version ?? null)
+  return c.json(ok({ message: 'Admin artifact backup recorded' }))
+})
+
+processor.post(`/artifacts/:tourId/${ARTIFACT_ADMIN}/completed`, async (c) => {
+  const tourId = c.req.param('tourId')
+  const now = new Date().toISOString()
+  const sess = await c.env.DB
+    .prepare(
+      `SELECT backup_r2_key, backup_version FROM artifact_upload_sessions
+        WHERE tour_id = ? AND artifact_type = ?
+        ORDER BY started_at DESC LIMIT 1`,
+    )
+    .bind(tourId, ARTIFACT_ADMIN)
+    .first<{ backup_r2_key: string | null; backup_version: string | null }>()
+
+  await c.env.DB
+    .prepare(
+      `UPDATE artifact_upload_sessions
+          SET stage = 'completed', completed_at = ?, updated_at = ?
+        WHERE tour_id = ? AND artifact_type = ? AND stage NOT IN ('aborted')`,
+    )
+    .bind(now, now, tourId, ARTIFACT_ADMIN)
+    .run()
+
+  await markTourArtifactCompleted(c.env.DB, {
+    tourId,
+    artifactType: ARTIFACT_ADMIN,
+    backupKey: sess?.backup_r2_key ?? null,
+    backupVersion: sess?.backup_version ?? null,
+  })
+  await finalizeArtifactUploadHistory(c.env.DB, {
+    tourId,
+    artifactType: ARTIFACT_ADMIN,
+    status: 'success',
+    stage: 'completed',
+    backupKey: sess?.backup_r2_key ?? null,
+    backupVersion: sess?.backup_version ?? null,
+  })
+  console.log(`[processor] Admin artifact fully completed: tour=${tourId}`)
+  return c.json(ok({ message: 'Admin artifact marked as completed' }))
+})
+
 
 export { processor as processorRoutes }

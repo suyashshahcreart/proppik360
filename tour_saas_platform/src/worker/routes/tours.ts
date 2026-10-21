@@ -33,8 +33,21 @@ import {
 import { purgePrefix, purgePrefixS3, type R2Config } from '../services/r2'
 import { goIngestAbort } from '../services/processor-ingest'
 import { ok, err } from '../utils/response'
-import { createTourSchema, tourDetailsSchema, mediaCollectionSchema, COLLECTION_RULES } from '../utils/validation'
+import {
+  createTourSchema,
+  tourDetailsSchema,
+  mediaCollectionSchema,
+  COLLECTION_RULES,
+  tourAdminPutSchema,
+  tourAdminResetPasswordSchema,
+} from '../utils/validation'
 import { withPublicViewerUrl } from '../utils/viewer-url'
+import {
+  listTourAdmins,
+  upsertTourAdmin,
+  resetTourAdminPassword,
+  deleteTourAdmin,
+} from '../services/tour-admins'
 import type { Env, Variables, MediaCollection } from '../types'
 
 /** NDJSON progress events emitted by DELETE /api/tours/:id */
@@ -242,6 +255,130 @@ tours.get('/:id/history', authMiddleware, requirePermission('tour_view'), async 
   const history = await listUploadHistory(c.env.DB, tourId)
   return c.json(ok({ tourId, history }))
 })
+
+// ── GET /api/tours/:id/tour-admin ─────────────────────────────
+// Returns { admins: TourAdmin[] }. Legacy clients: use admins[0].
+tours.get(
+  '/:id/tour-admin',
+  authMiddleware,
+  requirePermission('tour_view'),
+  requirePermission('tour_admin_view'),
+  async (c) => {
+    const user = c.get('user')
+    const tourId = c.req.param('id')
+    const tour = await getTourByIdForOwner(c.env.DB, tourId, user.id)
+    if (!tour) return c.json(err('NOT_FOUND', 'Tour not found'), 404)
+
+    const admins = await listTourAdmins(c.env.DB, tour.tour_id)
+    return c.json(ok({ admins, admin: admins[0] ?? null }))
+  },
+)
+
+// ── PUT /api/tours/:id/tour-admin ─────────────────────────────
+tours.put(
+  '/:id/tour-admin',
+  authMiddleware,
+  requirePermission('tour_edit'),
+  requirePermission('tour_admin_edit'),
+  async (c) => {
+    const user = c.get('user')
+    const tourId = c.req.param('id')
+    const tour = await getTourByIdForOwner(c.env.DB, tourId, user.id)
+    if (!tour) return c.json(err('NOT_FOUND', 'Tour not found'), 404)
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json(err('INVALID_INPUT', 'Request body must be valid JSON'), 422)
+    }
+
+    const parsed = tourAdminPutSchema.safeParse(body)
+    if (!parsed.success) {
+      return c.json(err('INVALID_INPUT', parsed.error.errors[0].message), 422)
+    }
+
+    try {
+      const { id: adminId, ...rest } = parsed.data
+      const admin = await upsertTourAdmin(
+        c.env.DB,
+        tour.tour_id,
+        { ...rest, source: 'manual' },
+        adminId,
+      )
+      return c.json(ok(admin))
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not save tour admin'
+      const field =
+        e && typeof e === 'object' && 'field' in e
+          ? String((e as { field: unknown }).field)
+          : undefined
+      return c.json(err('INVALID_INPUT', message, field ? { field } : undefined), 422)
+    }
+  },
+)
+
+// ── DELETE /api/tours/:id/tour-admin/:adminId ─────────────────
+tours.delete(
+  '/:id/tour-admin/:adminId',
+  authMiddleware,
+  requirePermission('tour_edit'),
+  requirePermission('tour_admin_edit'),
+  async (c) => {
+    const user = c.get('user')
+    const tourId = c.req.param('id')
+    const adminId = c.req.param('adminId')
+    const tour = await getTourByIdForOwner(c.env.DB, tourId, user.id)
+    if (!tour) return c.json(err('NOT_FOUND', 'Tour not found'), 404)
+
+    const deleted = await deleteTourAdmin(c.env.DB, tour.tour_id, adminId)
+    if (!deleted) return c.json(err('NOT_FOUND', 'Tour admin not found'), 404)
+    return c.json(ok({ message: 'Tour admin deleted' }))
+  },
+)
+
+// ── POST /api/tours/:id/tour-admin/reset-password ─────────────
+tours.post(
+  '/:id/tour-admin/reset-password',
+  authMiddleware,
+  requirePermission('tour_edit'),
+  requirePermission('tour_admin_edit'),
+  async (c) => {
+    const user = c.get('user')
+    const tourId = c.req.param('id')
+    const tour = await getTourByIdForOwner(c.env.DB, tourId, user.id)
+    if (!tour) return c.json(err('NOT_FOUND', 'Tour not found'), 404)
+
+    let body: unknown = {}
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+
+    const parsed = tourAdminResetPasswordSchema.safeParse(body)
+    if (!parsed.success) {
+      return c.json(err('INVALID_INPUT', parsed.error.errors[0].message), 422)
+    }
+
+    try {
+      const result = await resetTourAdminPassword(
+        c.env.DB,
+        tour.tour_id,
+        parsed.data.password,
+        parsed.data.id,
+      )
+      return c.json(ok(result))
+    } catch (e) {
+      const code =
+        e && typeof e === 'object' && 'code' in e
+          ? String((e as { code: unknown }).code)
+          : 'INVALID_INPUT'
+      const message = e instanceof Error ? e.message : 'Could not reset password'
+      return c.json(err(code, message), code === 'NOT_FOUND' ? 404 : 422)
+    }
+  },
+)
 
 // ── POST /api/tours/:id/resume ────────────────────────────────
 //

@@ -18,22 +18,23 @@ import (
 // Worker reconcile / processor startup re-POSTs safe.
 type JobQueue struct {
 	tourIDs chan queuedJob
-	cfg     PipelineConfig
+	cfg     AdminPipelineConfig
 
 	mu     sync.Mutex
-	active map[string]struct{} // queued or running
+	active map[string]struct{} // queued or running (key = tourID or tourID|artifact)
 }
 
 type queuedJob struct {
-	tourID string
-	phase  string
+	tourID      string
+	artifactType string
+	phase        string
 }
 
 // NewJobQueue creates a JobQueue with `maxConcurrent` dispatcher slots and
 // starts them immediately. queueBuffer controls how many pending tours can
 // wait before Enqueue starts blocking the caller (kept generous since the
 // HTTP handler enqueues from its own goroutine, not the request goroutine).
-func NewJobQueue(maxConcurrent int, queueBuffer int, cfg PipelineConfig) *JobQueue {
+func NewJobQueue(maxConcurrent int, queueBuffer int, cfg AdminPipelineConfig) *JobQueue {
 	if maxConcurrent <= 0 {
 		maxConcurrent = 1
 	}
@@ -56,6 +57,13 @@ func NewJobQueue(maxConcurrent int, queueBuffer int, cfg PipelineConfig) *JobQue
 	return q
 }
 
+func jobActiveKey(tourID, artifactType string) string {
+	if artifactType == "" || artifactType == ArtifactTourViewer {
+		return tourID
+	}
+	return tourID + "|" + artifactType
+}
+
 // Enqueue adds a tour to the queue with an empty phase (auto).
 // Returns false if the tour is already queued or running (duplicate).
 func (q *JobQueue) Enqueue(tourID string) bool {
@@ -64,37 +72,47 @@ func (q *JobQueue) Enqueue(tourID string) bool {
 
 // EnqueuePhase adds a tour. phase is "", "backup", or "cleanup".
 func (q *JobQueue) EnqueuePhase(tourID, phase string) bool {
+	return q.EnqueueArtifact(tourID, ArtifactTourViewer, phase)
+}
+
+// EnqueueArtifact queues a job for a specific artifact type (e.g. tour_admin).
+func (q *JobQueue) EnqueueArtifact(tourID, artifactType, phase string) bool {
+	if artifactType == "" {
+		artifactType = ArtifactTourViewer
+	}
+	key := jobActiveKey(tourID, artifactType)
+
 	q.mu.Lock()
-	if _, exists := q.active[tourID]; exists {
+	if _, exists := q.active[key]; exists {
 		q.mu.Unlock()
-		log.Printf("[queue] Skipping duplicate enqueue tour=%s (already queued/running)", tourID)
+		log.Printf("[queue] Skipping duplicate enqueue tour=%s artifact=%s (already queued/running)", tourID, artifactType)
 		return false
 	}
-	q.active[tourID] = struct{}{}
+	q.active[key] = struct{}{}
 	q.mu.Unlock()
 
-	job := queuedJob{tourID: tourID, phase: phase}
+	job := queuedJob{tourID: tourID, artifactType: artifactType, phase: phase}
 	select {
 	case q.tourIDs <- job:
-		log.Printf("[queue] Enqueued tour=%s phase=%q (pending=%d)", tourID, phase, len(q.tourIDs))
+		log.Printf("[queue] Enqueued tour=%s artifact=%s phase=%q (pending=%d)", tourID, artifactType, phase, len(q.tourIDs))
 	default:
-		log.Printf("[queue] Queue buffer full, waiting to enqueue tour=%s", tourID)
+		log.Printf("[queue] Queue buffer full, waiting to enqueue tour=%s artifact=%s", tourID, artifactType)
 		q.tourIDs <- job
 	}
 	return true
 }
 
-// Has returns whether a tour is currently queued or running.
+// Has returns whether a tour (viewer) is currently queued or running.
 func (q *JobQueue) Has(tourID string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	_, ok := q.active[tourID]
+	_, ok := q.active[jobActiveKey(tourID, ArtifactTourViewer)]
 	return ok
 }
 
-func (q *JobQueue) markDone(tourID string) {
+func (q *JobQueue) markDone(tourID, artifactType string) {
 	q.mu.Lock()
-	delete(q.active, tourID)
+	delete(q.active, jobActiveKey(tourID, artifactType))
 	q.mu.Unlock()
 }
 
@@ -102,8 +120,13 @@ func (q *JobQueue) markDone(tourID string) {
 // `id` is only used for log readability.
 func (q *JobQueue) dispatcher(id int) {
 	for job := range q.tourIDs {
-		log.Printf("[queue] dispatcher=%d picking up tour=%s phase=%q (still pending=%d)", id, job.tourID, job.phase, len(q.tourIDs))
-		RunPipeline(context.Background(), q.cfg, job.tourID, job.phase)
-		q.markDone(job.tourID)
+		log.Printf("[queue] dispatcher=%d picking up tour=%s artifact=%s phase=%q (still pending=%d)",
+			id, job.tourID, job.artifactType, job.phase, len(q.tourIDs))
+		if job.artifactType == ArtifactTourAdmin || job.phase == "publish_admin" {
+			RunAdminPipeline(context.Background(), q.cfg, job.tourID)
+		} else {
+			RunPipeline(context.Background(), q.cfg.PipelineConfig, job.tourID, job.phase)
+		}
+		q.markDone(job.tourID, job.artifactType)
 	}
 }

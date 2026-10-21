@@ -14,10 +14,13 @@ import {
   Loader2,
   MapPin,
   Sofa,
-  User,
+  Upload,
+  User as UserIcon,
   Warehouse,
 } from 'lucide-react'
 import { api, ApiError } from '../services/api'
+import { uploadPagePath } from '@/lib/upload-routes'
+import { can } from '@/components/shared/PermissionGate'
 import type {
   FurnishType,
   ListingStatus,
@@ -28,7 +31,9 @@ import type {
   Tour,
   TourDetailsInput,
   TourStatus,
+  User,
 } from '../types'
+import { TourAdminSection } from '@/components/tours/TourAdminSection'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { ListBox } from '@/components/shared/ListBox'
 import { FormField } from '@/components/shared/FormField'
@@ -114,7 +119,7 @@ const PAYMENT_STATUS: { value: PaymentStatus; label: string }[] = [
 ]
 
 const OWNER_OPTIONS: { value: OwnerType; label: string; icon: ReactNode }[] = [
-  { value: 'owner', label: 'Owner', icon: <User className="size-3.5" /> },
+  { value: 'owner', label: 'Owner', icon: <UserIcon className="size-3.5" /> },
   { value: 'broker', label: 'Broker', icon: <Briefcase className="size-3.5" /> },
   { value: 'other', label: 'Other', icon: <Coffee className="size-3.5" /> },
 ]
@@ -397,7 +402,7 @@ function CollapsibleFormSection({
   )
 }
 
-export function TourDetailsPage() {
+export function TourDetailsPage({ user }: { user: User }) {
   const { tourId } = useParams<{ tourId?: string }>()
   const isEdit = Boolean(tourId)
   const navigate = useNavigate()
@@ -436,6 +441,8 @@ export function TourDetailsPage() {
   const qrRef = useRef(qrCode)
   const touchedRef = useRef(new Set<string>())
   const submittedRef = useRef(false)
+  /** Sync lock — React state alone cannot block a second submit in the same tick. */
+  const savingLockRef = useRef(false)
   valuesRef.current = form
   qrRef.current = qrCode
 
@@ -684,12 +691,15 @@ export function TourDetailsPage() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
+    event.stopPropagation()
+    if (savingLockRef.current || saving) return
     submittedRef.current = true
 
     const nextErrors = collectFieldErrors()
     setFieldErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) {
       setError('Please fix the highlighted fields. The note under each box explains what to change.')
+      toast.warning('Please fix the highlighted fields', { id: 'tour-details-validation' })
       const first = Object.keys(nextErrors)[0]
       const el =
         document.getElementById(
@@ -708,6 +718,7 @@ export function TourDetailsPage() {
     }
 
     setError(null)
+    savingLockRef.current = true
 
     const areaRaw = form.super_built_up_area.trim()
     const priceRaw = form.price.trim()
@@ -758,7 +769,9 @@ export function TourDetailsPage() {
       const savedForm = { ...form, slug: saved.tour_id }
       setForm(savedForm)
       setBaseline(serializeForm(savedForm, saved.qr_code ?? null))
-      toast.success(isEdit ? 'Changes saved' : 'Tour created successfully')
+      toast.success(isEdit ? 'Changes saved' : 'Tour created successfully', {
+        id: 'tour-details-save',
+      })
 
       if (!isEdit) {
         setPostCreateId(saved.tour_id)
@@ -799,11 +812,13 @@ export function TourDetailsPage() {
           behavior: 'smooth',
           block: 'center',
         })
+        toast.warning(message, { id: 'tour-details-save' })
       } else {
         setError(message)
+        toast.error(message, { id: 'tour-details-save' })
       }
-      toast.error(message)
     } finally {
+      savingLockRef.current = false
       setSaving(false)
     }
   }
@@ -815,7 +830,18 @@ export function TourDetailsPage() {
     <>
       {isEdit && tourId && (
         <Button type="button" variant="outline" asChild>
-          <Link to={`/upload?tour=${encodeURIComponent(tourId)}`}>Upload ZIP</Link>
+          <Link to={uploadPagePath(tourId)}>
+            <Upload className="size-4" />
+            Upload ZIP
+          </Link>
+        </Button>
+      )}
+      {isEdit && tourId && can(user, 'tour_admin_upload') && (
+        <Button type="button" variant="outline" asChild>
+          <Link to={uploadPagePath(tourId, { artifact: 'tour_admin' })}>
+            <Upload className="size-4" />
+            Upload admin package
+          </Link>
         </Button>
       )}
       <Button
@@ -852,6 +878,14 @@ export function TourDetailsPage() {
                 </Badge>
               )}
               {tourStatus && <StatusBadge status={tourStatus} />}
+              {isEdit && tourId && can(user, 'tour_admin_upload') && (
+                <Button type="button" size="sm" variant="outline" asChild>
+                  <Link to={uploadPagePath(tourId, { artifact: 'tour_admin' })}>
+                    <Upload className="size-4" />
+                    Upload admin package
+                  </Link>
+                </Button>
+              )}
               <Button type="submit" disabled={saving || loading} className="min-w-32">
                 {saving && <Loader2 className="size-4 animate-spin" />}
                 {saveLabel}
@@ -1412,6 +1446,17 @@ export function TourDetailsPage() {
           )}
         </ListBox>
       </form>
+
+      {/* Outside the tour form — avoids nested <form> submitting the parent twice */}
+      {isEdit && tourId && !loading && (
+        <div className="mt-4">
+          <ListBox title="Tour admin login" subtitle="Password / OTP logins for this tour">
+            <div className="p-4 sm:p-5">
+              <TourAdminSection tourId={tourId} user={user} />
+            </div>
+          </ListBox>
+        </div>
+      )}
 
       <ConfirmDialog
         open={discardOpen}

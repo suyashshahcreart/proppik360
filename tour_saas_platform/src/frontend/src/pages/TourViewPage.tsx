@@ -25,6 +25,7 @@ import {
 import { toast } from 'sonner'
 import { api } from '../services/api'
 import { formatBytes } from '../services/uploader'
+import { uploadPagePath } from '@/lib/upload-routes'
 import type {
   FurnishType,
   ListingStatus,
@@ -178,6 +179,8 @@ export function TourViewPage({ user }: { user: AuthUser }) {
   const [categories, setCategories] = useState<PropertyCategoryTreeNode[]>([])
   const [media, setMedia] = useState<MediaListItem[]>([])
   const [history, setHistory] = useState<TourUploadHistoryEntry[]>([])
+  const [adminHistory, setAdminHistory] = useState<TourUploadHistoryEntry[]>([])
+  const [adminPublishUrl, setAdminPublishUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -189,16 +192,22 @@ export function TourViewPage({ user }: { user: AuthUser }) {
 
     void (async () => {
       try {
-        const [tourData, options, historyData] = await Promise.all([
+        const [tourData, options, historyData, adminHistoryData, adminInfo] = await Promise.all([
           api.tours.get(tourId),
           api.tours.formOptions(),
           api.tours.history(tourId).catch(() => ({ tourId, history: [] as TourUploadHistoryEntry[] })),
+          api.artifacts.tourAdmin
+            .history(tourId)
+            .catch(() => ({ tourId, artifactType: 'tour_admin', history: [] as TourUploadHistoryEntry[] })),
+          api.artifacts.tourAdmin.publishInfo(tourId).catch(() => null),
         ])
         if (cancelled) return
         setTour(tourData)
         setCustomers(options.customers)
         setCategories(options.categories)
         setHistory(historyData.history)
+        setAdminHistory(adminHistoryData.history)
+        setAdminPublishUrl(adminInfo?.publishUrl ?? null)
 
         try {
           const mediaRes = await api.media.list({
@@ -290,9 +299,17 @@ export function TourViewPage({ user }: { user: AuthUser }) {
               <StatusBadge status={tour.status} />
               {can(user, 'tour_create') && tour.status === 'draft' && (
                 <Button asChild size="sm" variant="outline">
-                  <Link to={`/upload?tour=${encodeURIComponent(tour.tour_id)}`}>
+                  <Link to={uploadPagePath(tour.tour_id)}>
                     <Upload className="size-4" />
                     Upload ZIP
+                  </Link>
+                </Button>
+              )}
+              {can(user, 'tour_admin_upload') && (
+                <Button asChild size="sm" variant="outline">
+                  <Link to={uploadPagePath(tour.tour_id, { artifact: 'tour_admin' })}>
+                    <Upload className="size-4" />
+                    Upload admin package
                   </Link>
                 </Button>
               )}
@@ -301,6 +318,14 @@ export function TourViewPage({ user }: { user: AuthUser }) {
                   <a href={tour.viewer_url} target="_blank" rel="noopener noreferrer">
                     <ExternalLink className="size-4" />
                     Open viewer
+                  </a>
+                </Button>
+              )}
+              {adminPublishUrl && (
+                <Button asChild size="sm" variant="outline">
+                  <a href={adminPublishUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="size-4" />
+                    Open admin
                   </a>
                 </Button>
               )}
@@ -702,6 +727,60 @@ export function TourViewPage({ user }: { user: AuthUser }) {
             ) : (
               <div className="flex flex-col gap-3 p-4">
                 {history.map((entry, index) => (
+                  <UploadHistoryCard
+                    key={entry.id}
+                    entry={entry}
+                    defaultOpen={index === 0}
+                  />
+                ))}
+              </div>
+            )}
+          </ListBox>
+
+          <ListBox
+            title="Admin package uploads"
+            subtitle={
+              loading
+                ? 'Loading…'
+                : adminHistory.length === 0
+                  ? 'No admin ZIP uploads yet'
+                  : `${adminHistory.length} attempt${adminHistory.length === 1 ? '' : 's'}`
+            }
+            headerActions={
+              can(user, 'tour_admin_upload') && tour ? (
+                <Button asChild size="sm" variant="outline">
+                  <Link to={uploadPagePath(tour.tour_id, { artifact: 'tour_admin' })}>
+                    <Upload className="size-4" />
+                    Upload
+                  </Link>
+                </Button>
+              ) : undefined
+            }
+          >
+            {loading ? (
+              <DetailSkeleton rows={3} />
+            ) : adminHistory.length === 0 ? (
+              <EmptyState
+                icon={Clock}
+                title="No admin package history"
+                description="Upload a tour-admin ZIP to publish the admin site for this tour (separate R2 bucket)."
+              />
+            ) : (
+              <div className="flex flex-col gap-3 p-4">
+                {adminPublishUrl && (
+                  <p className="text-xs text-muted-foreground">
+                    Admin URL:{' '}
+                    <a
+                      href={adminPublishUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-primary underline-offset-2 hover:underline"
+                    >
+                      {adminPublishUrl}
+                    </a>
+                  </p>
+                )}
+                {adminHistory.map((entry, index) => (
                   <UploadHistoryCard
                     key={entry.id}
                     entry={entry}

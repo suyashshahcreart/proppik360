@@ -33,13 +33,23 @@ func main() {
 	}
 	processor.CleanupOrphanedTempFiles(cfg.TempDir)
 
-	// Build R2 client
+	// Build R2 client (viewer / tour ZIP)
 	r2Client := r2.New(r2.Config{
 		AccountID:       cfg.R2AccountID,
 		BucketName:      cfg.R2BucketName,
 		AccessKeyID:     cfg.R2AccessKeyID,
 		SecretAccessKey: cfg.R2SecretAccessKey,
 	})
+
+	var adminR2Client *r2.Client
+	if cfg.R2AdminBucketName != "" {
+		adminR2Client = r2.New(r2.Config{
+			AccountID:       cfg.R2AccountID,
+			BucketName:      cfg.R2AdminBucketName,
+			AccessKeyID:     cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey,
+		})
+	}
 
 	// Build Worker API client
 	workerClient := api.NewClient(cfg.WorkerAPIURL, cfg.ProcessorSecret)
@@ -51,20 +61,25 @@ func main() {
 
 	ingest := processor.NewIngestStore(cfg.TempDir)
 
-	// Assemble job config (shared across all jobs)
-	jobCfg := processor.PipelineConfig{
-		JobConfig: processor.JobConfig{
-			WorkerClient:        workerClient,
-			R2Client:            r2Client,
-			R2BucketName:        cfg.R2BucketName,
-			R2PublicDomain:      cfg.R2PublicDomain,
-			TempDir:             cfg.TempDir,
-			UploadLimiter:       uploadLimiter,
-			DownloadSemaphore:   downloadSem,
-			DownloadConcurrency: cfg.DownloadConcurrency,
+	// Assemble job config (shared across all jobs) — includes optional admin bucket.
+	jobCfg := processor.AdminPipelineConfig{
+		PipelineConfig: processor.PipelineConfig{
+			JobConfig: processor.JobConfig{
+				WorkerClient:        workerClient,
+				R2Client:            r2Client,
+				R2BucketName:        cfg.R2BucketName,
+				R2PublicDomain:      cfg.R2PublicDomain,
+				TempDir:             cfg.TempDir,
+				UploadLimiter:       uploadLimiter,
+				DownloadSemaphore:   downloadSem,
+				DownloadConcurrency: cfg.DownloadConcurrency,
+			},
+			Ingest:               ingest,
+			BackupVerifyAttempts: cfg.BackupVerifyAttempts,
 		},
-		Ingest:               ingest,
-		BackupVerifyAttempts: cfg.BackupVerifyAttempts,
+		AdminR2Client:     adminR2Client,
+		AdminR2BucketName: cfg.R2AdminBucketName,
+		AdminPublicDomain: cfg.R2AdminPublicDomain,
 	}
 
 	// Job queue — caps how many tours process at the same time.
@@ -82,6 +97,9 @@ func main() {
 	log.Printf("[main] Tour Processor starting on %s", addr)
 	log.Printf("[main] Worker API: %s", cfg.WorkerAPIURL)
 	log.Printf("[main] R2 Bucket:  %s", cfg.R2BucketName)
+	if cfg.R2AdminBucketName != "" {
+		log.Printf("[main] Admin R2:  %s (domain=%s)", cfg.R2AdminBucketName, cfg.R2AdminPublicDomain)
+	}
 	log.Printf("[main] Temp Dir:   %s", cfg.TempDir)
 	log.Printf("[main] Max concurrent jobs: %d | Upload limiter mode=%s start/limit=%d (min=%d max=%d hard=%d budget=%d%%) | Global download concurrency: %d | Download chunks/job: %d",
 		cfg.MaxConcurrentJobs,

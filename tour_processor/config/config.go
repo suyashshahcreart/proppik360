@@ -24,6 +24,10 @@ type Config struct {
 	R2BucketName      string
 	R2PublicDomain    string // e.g. "pub-abc.r2.dev" — used to build viewer URLs
 
+	// Separate R2 bucket for tour_admin artifact packages (optional until used).
+	R2AdminBucketName   string
+	R2AdminPublicDomain string
+
 	// HTTP server
 	Port string
 
@@ -66,9 +70,11 @@ func Load() (*Config, error) {
 		R2AccountID:       getEnv("R2_ACCOUNT_ID", ""),
 		R2AccessKeyID:     getEnv("R2_ACCESS_KEY_ID", ""),
 		R2SecretAccessKey: getEnv("R2_SECRET_ACCESS_KEY", ""),
-		R2BucketName:      getEnv("R2_BUCKET_NAME", "tour-saas-uploads"),
-		R2PublicDomain:    getEnv("R2_PUBLIC_DOMAIN", ""),
-		Port:              getEnv("PORT", "9000"),
+		R2BucketName:        getEnv("R2_BUCKET_NAME", "tour-saas-uploads"),
+		R2PublicDomain:      getEnv("R2_PUBLIC_DOMAIN", ""),
+		R2AdminBucketName:   getEnv("R2_ADMIN_BUCKET_NAME", ""),
+		R2AdminPublicDomain: getEnv("R2_ADMIN_PUBLIC_DOMAIN", ""),
+		Port:                getEnv("PORT", "9000"),
 		TempDir:           getEnv("TEMP_DIR", os.TempDir()),
 
 		MaxConcurrentJobs:            getEnvInt("MAX_CONCURRENT_JOBS", 5),

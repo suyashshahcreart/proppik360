@@ -119,6 +119,8 @@ export interface TourUploadHistoryReport {
     bytes: { current: number; total: number }
   }
   viewer_url?: string | null
+  /** Admin (or other artifact) public URL after publish. */
+  publish_url?: string | null
   layout?: string | null
   backup?: { key?: string | null; version?: string | null; verified?: boolean }
   warnings: string[]
@@ -298,6 +300,62 @@ export interface AdminUser {
   status: 'active' | 'suspended'
   created_at: string
   updated_at: string
+}
+
+/** Flat settings map from GET /system/settings */
+export type SettingsMap = Record<string, string | null>
+
+export interface TourAdminMaster {
+  id: string
+  auto_create_on_tour_create: boolean
+  password_enabled_default: boolean
+  otp_enabled_default: boolean
+  default_username_pattern: string
+  password_mode: 'random' | 'fixed'
+  has_fixed_password: boolean
+  default_country_code: string
+  default_mobile: string | null
+  is_active_default: boolean
+  updated_at: string
+}
+
+/** Default admin profile applied to new tours when auto-create is on. */
+export interface TourAdminMasterTemplate {
+  id: string
+  label: string
+  username_pattern: string
+  password_mode: 'random' | 'fixed'
+  has_fixed_password: boolean
+  country_code: string
+  mobile: string | null
+  password_enabled: boolean
+  otp_enabled: boolean
+  is_active: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface TourAdmin {
+  id: string
+  tour_id: string
+  username: string
+  country_code: string
+  mobile: string | null
+  password_enabled: boolean
+  otp_enabled: boolean
+  is_active: boolean
+  source: string
+  has_password: boolean
+  last_login_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TourAdminListResponse {
+  admins: TourAdmin[]
+  /** First admin — legacy convenience */
+  admin: TourAdmin | null
 }
 
 export interface CustomerInput {

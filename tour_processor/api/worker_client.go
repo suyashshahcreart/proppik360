@@ -200,6 +200,58 @@ func (c *Client) Reconcile() error {
 	return c.postJSON(fmt.Sprintf("%s/api/processor/reconcile", c.baseURL), map[string]any{})
 }
 
+// ── Artifact (tour_admin) callbacks ─────────────────────────────
+
+func (c *Client) artifactURL(tourID, artifactType, suffix string) string {
+	return fmt.Sprintf("%s/api/processor/artifacts/%s/%s/%s", c.baseURL, tourID, artifactType, suffix)
+}
+
+// ArtifactComplete notifies Worker that admin package publish succeeded.
+func (c *Client) ArtifactComplete(tourID, artifactType, publishURL, layout string, saveBackupZip bool) error {
+	return c.postJSON(c.artifactURL(tourID, artifactType, "complete"), map[string]any{
+		"publishUrl":     publishURL,
+		"layout":         layout,
+		"saveBackupZip":  saveBackupZip,
+	})
+}
+
+// ArtifactBackupComplete records the verified admin backup key.
+func (c *Client) ArtifactBackupComplete(tourID, artifactType, backupKey, version string) error {
+	return c.postJSON(c.artifactURL(tourID, artifactType, "backup-complete"), map[string]string{
+		"backupKey": backupKey,
+		"version":   version,
+	})
+}
+
+// ArtifactMarkCompleted tells Worker that admin backup/cleanup finished.
+func (c *Client) ArtifactMarkCompleted(tourID, artifactType string) error {
+	return c.postJSON(c.artifactURL(tourID, artifactType, "completed"), map[string]any{})
+}
+
+// ArtifactFail notifies Worker that admin package processing failed.
+func (c *Client) ArtifactFail(tourID, artifactType, errMsg string) error {
+	return c.postJSON(c.artifactURL(tourID, artifactType, "fail"), map[string]string{"error": errMsg})
+}
+
+// ArtifactProgress sends live progress for an artifact job.
+func (c *Client) ArtifactProgress(tourID, artifactType string, currentFiles, totalFiles int, currentBytes, totalBytes int64, stage string) error {
+	body := map[string]any{
+		"currentFiles": currentFiles,
+		"totalFiles":   totalFiles,
+		"currentBytes": currentBytes,
+		"totalBytes":   totalBytes,
+	}
+	if stage != "" {
+		body["stage"] = stage
+	}
+	return c.postJSON(c.artifactURL(tourID, artifactType, "progress"), body)
+}
+
+// ArtifactSetStage reports a pipeline stage for an artifact.
+func (c *Client) ArtifactSetStage(tourID, artifactType, stage string) error {
+	return c.ArtifactProgress(tourID, artifactType, 0, 0, 0, 0, stage)
+}
+
 func (c *Client) postJSON(url string, body any) error {
 	data, err := json.Marshal(body)
 	if err != nil {

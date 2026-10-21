@@ -436,6 +436,86 @@ export async function listObjects(
   return keys
 }
 
+export interface R2ListPageObject {
+  key: string
+  size: number
+  lastModified: string | null
+}
+
+export interface R2ListPageResult {
+  objects: R2ListPageObject[]
+  delimitedPrefixes: string[]
+  truncated: boolean
+  cursor?: string
+}
+
+/**
+ * One S3 ListObjectsV2 page. Use delimiter=/ for folder-style listings.
+ */
+export async function listObjectsPage(
+  config: R2Config,
+  options: {
+    prefix?: string
+    delimiter?: string
+    limit?: number
+    cursor?: string
+  } = {},
+): Promise<R2ListPageResult> {
+  const client = makeClient(config)
+  const baseUrl = `https://${config.accountId}.r2.cloudflarestorage.com/${config.bucketName}`
+  const url = new URL(baseUrl)
+  url.searchParams.set('list-type', '2')
+  url.searchParams.set('max-keys', String(Math.min(1000, Math.max(1, options.limit ?? 200))))
+  if (options.prefix) url.searchParams.set('prefix', options.prefix)
+  if (options.delimiter) url.searchParams.set('delimiter', options.delimiter)
+  if (options.cursor) url.searchParams.set('continuation-token', options.cursor)
+
+  const response = await client.fetch(url.toString(), { method: 'GET' })
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`R2 listObjectsPage failed: HTTP ${response.status}: ${body}`)
+  }
+
+  const xml = await response.text()
+  const objects: R2ListPageObject[] = []
+  for (const match of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+    const block = match[1]
+    const key = block.match(/<Key>([^<]+)<\/Key>/)?.[1]
+    if (!key) continue
+    const size = Number(block.match(/<Size>([^<]+)<\/Size>/)?.[1] ?? 0)
+    const lastModified = block.match(/<LastModified>([^<]+)<\/LastModified>/)?.[1] ?? null
+    objects.push({ key, size, lastModified })
+  }
+
+  const delimitedPrefixes: string[] = []
+  for (const match of xml.matchAll(/<CommonPrefixes>([\s\S]*?)<\/CommonPrefixes>/g)) {
+    const p = match[1].match(/<Prefix>([^<]+)<\/Prefix>/)?.[1]
+    if (p) delimitedPrefixes.push(p)
+  }
+
+  const truncated = xml.match(/<IsTruncated>([^<]+)<\/IsTruncated>/)?.[1] === 'true'
+  const cursor = truncated
+    ? xml.match(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/)?.[1]
+    : undefined
+
+  return { objects, delimitedPrefixes, truncated, cursor }
+}
+
+/** Short-lived presigned GET for a single object. Keys never leave the server. */
+export async function getPresignedDownloadUrl(
+  config: R2Config,
+  r2Key: string,
+  expiresSec = 3600,
+): Promise<string> {
+  const client = makeClient(config)
+  const url = new URL(makeObjectUrl(config, r2Key))
+  url.searchParams.set('X-Amz-Expires', String(expiresSec))
+  const signed = await client.sign(new Request(url.toString(), { method: 'GET' }), {
+    aws: { signQuery: true },
+  })
+  return signed.url
+}
+
 /**
  * Delete multiple R2 objects via S3 DeleteObjects.
  *

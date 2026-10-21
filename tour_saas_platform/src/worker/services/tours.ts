@@ -177,6 +177,16 @@ export async function softDeleteTour(
         db
           .prepare(`UPDATE tour_upload_history SET tour_id = ? WHERE tour_id = ?`)
           .bind(deletedId, tourId),
+        // Move tour-admin rows before/with tour_id rename (no ON UPDATE CASCADE)
+        db
+          .prepare(`UPDATE tour_admin_sessions SET tour_id = ? WHERE tour_id = ?`)
+          .bind(deletedId, tourId),
+        db
+          .prepare(`UPDATE tour_admin_otp_requests SET tour_id = ? WHERE tour_id = ?`)
+          .bind(deletedId, tourId),
+        db
+          .prepare(`UPDATE tour_admins SET tour_id = ? WHERE tour_id = ?`)
+          .bind(deletedId, tourId),
         db
           .prepare(
             `UPDATE tours
@@ -193,7 +203,8 @@ export async function softDeleteTour(
           .bind(deletedId, tourId),
       ])
 
-      if ((results[3]?.meta?.changes ?? 0) === 0) return false
+      // tours UPDATE is index 6 after the batch stretch
+      if ((results[6]?.meta?.changes ?? 0) === 0) return false
       return true
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e)
@@ -344,6 +355,15 @@ export async function createTour(
     .first<Tour>()
 
   if (!tour) throw new Error('Failed to retrieve tour after creation')
+
+  // Auto-create per-tour admin from master settings (no-op if disabled / exists)
+  try {
+    const { applyMasterToNewTour } = await import('./tour-admin-master')
+    await applyMasterToNewTour(db, publicTourId)
+  } catch (e) {
+    console.error('[tours] applyMasterToNewTour failed (non-fatal):', e)
+  }
+
   return tour
 }
 
@@ -369,6 +389,15 @@ export async function renameTourId(
       .prepare(`UPDATE tour_upload_history SET tour_id = ? WHERE tour_id = ?`)
       .bind(newId, oldId),
     db
+      .prepare(`UPDATE tour_admin_sessions SET tour_id = ? WHERE tour_id = ?`)
+      .bind(newId, oldId),
+    db
+      .prepare(`UPDATE tour_admin_otp_requests SET tour_id = ? WHERE tour_id = ?`)
+      .bind(newId, oldId),
+    db
+      .prepare(`UPDATE tour_admins SET tour_id = ? WHERE tour_id = ?`)
+      .bind(newId, oldId),
+    db
       .prepare(
         `UPDATE tours SET tour_id = ?, updated_at = ?
          WHERE tour_id = ? AND owner_id = ? AND deleted_at IS NULL`,
@@ -383,7 +412,8 @@ export async function renameTourId(
       .bind(newId, oldId),
   ])
 
-  return (results[3]?.meta?.changes ?? 0) > 0
+  // tours UPDATE is index 6 after tour-admin rebinds
+  return (results[6]?.meta?.changes ?? 0) > 0
 }
 
 /**

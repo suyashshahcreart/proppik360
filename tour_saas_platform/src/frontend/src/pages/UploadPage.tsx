@@ -30,7 +30,11 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-import { resolveUploadTourId, uploadPagePath } from '@/lib/upload-routes'
+import {
+  resolveUploadArtifact,
+  resolveUploadTourId,
+  uploadPagePath,
+} from '@/lib/upload-routes'
 import { resolveTourViewerUrl } from '@/lib/viewer-url'
 
 type PageState = 'form' | 'pipeline' | 'error'
@@ -39,6 +43,30 @@ interface LocationState {
   tourId?: string
   tourName?: string
 }
+
+interface AdminPublishInfo {
+  tourId: string
+  artifactType: string
+  publishUrl: string | null
+  status: string | null
+  lastSuccessAt: string | null
+  lastUploadAt: string | null
+  backupKey: string | null
+  backupVersion: string | null
+  publicDomain: string | null
+}
+
+const ADMIN_ACTIVE_STATUSES = new Set([
+  'ingesting',
+  'uploading',
+  'uploaded',
+  'processing',
+  'ready_pending_backup',
+  'backing_up',
+  'cleanup',
+])
+
+const ADMIN_DONE_STATUSES = new Set(['ready', 'completed'])
 
 type StepKey =
   | 'go_upload'
@@ -676,6 +704,8 @@ export function UploadPage() {
     searchParams.get('tour'),
     locationState?.tourId,
   )
+  const uploadArtifact = resolveUploadArtifact(searchParams.get('artifact'))
+  const isAdminArtifact = uploadArtifact === 'tour_admin'
 
   const [tours, setTours] = useState<TourOption[]>([])
   const [loadingTours, setLoadingTours] = useState(true)
@@ -699,6 +729,7 @@ export function UploadPage() {
   const [resuming, setResuming] = useState(false)
   const [loadingTour, setLoadingTour] = useState(false)
   const [saveBackupZip, setSaveBackupZip] = useState(false)
+  const [adminPublishInfo, setAdminPublishInfo] = useState<AdminPublishInfo | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploaderRef = useRef<GoIngestUploader | null>(null)
@@ -995,12 +1026,25 @@ export function UploadPage() {
   useEffect(() => {
     if (!tourId) return
     const current = resolveUploadTourId(pathTourId, searchParams.get('tour'), null)
-    if (current === tourId) return
-    navigate(uploadPagePath(tourId), {
-      replace: true,
-      state: locationState ?? { tourId, tourName: tour?.name },
-    })
-  }, [tourId, pathTourId, searchParams, navigate, locationState, tour?.name])
+    const currentArtifact = resolveUploadArtifact(searchParams.get('artifact'))
+    if (current === tourId && currentArtifact === uploadArtifact) return
+    navigate(
+      uploadPagePath(tourId, isAdminArtifact ? { artifact: 'tour_admin' } : undefined),
+      {
+        replace: true,
+        state: locationState ?? { tourId, tourName: tour?.name },
+      },
+    )
+  }, [
+    tourId,
+    pathTourId,
+    searchParams,
+    navigate,
+    locationState,
+    tour?.name,
+    uploadArtifact,
+    isAdminArtifact,
+  ])
 
   // Load existing tour from URL or Tours list navigation (resume / reload).
   useEffect(() => {
@@ -1009,10 +1053,11 @@ export function UploadPage() {
 
     let cancelled = false
     setLoadingTour(true)
+    if (isAdminArtifact) setAdminPublishInfo(null)
 
     void api.tours
       .get(id)
-      .then((fetched) => {
+      .then(async (fetched) => {
         if (cancelled) return
         setTour(fetched)
         setSaveBackupZip(tourWantsBackupZip(fetched))
@@ -1030,6 +1075,39 @@ export function UploadPage() {
               !['done', 'error', 'aborted'].includes(progressRef.current.status)))
 
         if (activeClientUpload) {
+          return
+        }
+
+        // Admin package uses tour_artifacts — never inherit viewer ZIP / tours.status pipeline.
+        if (isAdminArtifact) {
+          try {
+            const info = await api.artifacts.tourAdmin.publishInfo(id)
+            if (cancelled) return
+            setAdminPublishInfo(info)
+            const adminStatus = info.status ?? null
+            if (adminStatus && ADMIN_ACTIVE_STATUSES.has(adminStatus)) {
+              setPageState(adminStatus === 'failed' ? 'error' : 'pipeline')
+              setPipelineStartedAt(Date.now())
+              setErrorMessage(null)
+            } else if (adminStatus === 'failed') {
+              setPageState('form')
+              setErrorMessage('Admin package processing failed. Upload a new ZIP to retry.')
+            } else {
+              // No admin upload yet (or already published) → fresh upload form.
+              setPageState('form')
+              setErrorMessage(null)
+              setShowReupload(false)
+              setProgress(null)
+              setR2FinishedAt(null)
+              setPipelineStartedAt(null)
+            }
+          } catch (err) {
+            if (cancelled) return
+            console.warn('[upload] failed to load admin publish info', err)
+            setAdminPublishInfo(null)
+            setPageState('form')
+            setErrorMessage(null)
+          }
           return
         }
 
@@ -1082,7 +1160,7 @@ export function UploadPage() {
     return () => {
       cancelled = true
     }
-  }, [urlTourId, startPolling])
+  }, [urlTourId, startPolling, isAdminArtifact])
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null
@@ -1142,7 +1220,8 @@ export function UploadPage() {
     if (!id || id === tourId) return
     setErrorMessage(null)
     setTourId(id)
-    navigate(uploadPagePath(id), {
+    setAdminPublishInfo(null)
+    navigate(uploadPagePath(id, isAdminArtifact ? { artifact: 'tour_admin' } : undefined), {
       replace: true,
       state: { tourId: id, tourName: tours.find((item) => item.id === id)?.name },
     })
@@ -1180,14 +1259,49 @@ export function UploadPage() {
       const uploader = new GoIngestUploader({
         tourId: id,
         file: selectedFile,
+        artifactType: uploadArtifact,
         saveBackupZip,
-        forceReupload: showReupload && (tour?.uploadComplete ?? tour?.zipOnR2 ?? false),
-        resumeUploadId: resumeSession ?? tour?.upload_id ?? undefined,
-        resumeR2Key: resumeSession ?? tour?.r2_key ?? undefined,
+        forceReupload:
+          !isAdminArtifact &&
+          showReupload &&
+          (tour?.uploadComplete ?? tour?.zipOnR2 ?? false),
+        resumeUploadId: isAdminArtifact
+          ? undefined
+          : (resumeSession ?? tour?.upload_id ?? undefined),
+        resumeR2Key: isAdminArtifact ? undefined : (resumeSession ?? tour?.r2_key ?? undefined),
         onProgress: (p) => setProgress(p),
         onComplete: () => {
           setR2FinishedAt(Date.now())
-          startPolling(id!)
+          if (isAdminArtifact) {
+            void (async () => {
+              // Poll publish-info until ready/completed (does not touch tours.status).
+              for (let i = 0; i < 90; i++) {
+                try {
+                  const info = await api.artifacts.tourAdmin.publishInfo(id!)
+                  setAdminPublishInfo(info)
+                  if (info.status === 'completed' || info.status === 'ready') {
+                    setErrorMessage(null)
+                    toast.success(
+                      info.publishUrl
+                        ? `Admin package ready: ${info.publishUrl}`
+                        : 'Admin package published',
+                    )
+                    return
+                  }
+                  if (info.status === 'failed') {
+                    setErrorMessage('Admin package processing failed')
+                    setPageState('error')
+                    return
+                  }
+                } catch {
+                  /* keep polling */
+                }
+                await new Promise((r) => setTimeout(r, 2000))
+              }
+            })()
+          } else {
+            startPolling(id!)
+          }
         },
         onError: (msg) => {
           console.error('[upload] pipeline error', msg)
@@ -1239,6 +1353,7 @@ export function UploadPage() {
     setSelectedFile(null)
     setTour(null)
     setTourId(urlTourId)
+    setAdminPublishInfo(null)
     setPipelineStartedAt(null)
     setR2StartedAt(null)
     setR2FinishedAt(null)
@@ -1260,6 +1375,7 @@ export function UploadPage() {
     setSelectedFile(null)
     setTour(null)
     setTourId(null)
+    setAdminPublishInfo(null)
     setPipelineStartedAt(null)
     setR2StartedAt(null)
     setR2FinishedAt(null)
@@ -1272,7 +1388,9 @@ export function UploadPage() {
     setResuming(false)
     uploaderRef.current = null
     if (fileInputRef.current) fileInputRef.current.value = ''
-    navigate('/upload', { replace: true })
+    navigate(uploadPagePath(null, isAdminArtifact ? { artifact: 'tour_admin' } : undefined), {
+      replace: true,
+    })
   }
 
   const r2ElapsedMs =
@@ -1295,34 +1413,93 @@ export function UploadPage() {
   const overallElapsedMs =
     pipelineStartMs != null ? Math.max(0, clockMs - pipelineStartMs) : 0
 
-  const uploadComplete = tour?.uploadComplete ?? tour?.zipOnR2 ?? false
+  // Admin ZIP is separate from viewer tour ZIP — never treat tours.zipOnR2 as admin done.
+  const uploadComplete = isAdminArtifact
+    ? false
+    : (tour?.uploadComplete ?? tour?.zipOnR2 ?? false)
   const canResume =
+    !isAdminArtifact &&
     (tour?.canResumeProcessing ?? uploadComplete) &&
     tour?.status !== 'ready' &&
     !tour?.upload_id
 
   const clientUploading =
     progress != null && !['done', 'error', 'aborted', 'idle'].includes(progress.status)
-  const zipOnGo = ingestZipReceived(tour, serverIngest, progress, uploadComplete)
+  const zipOnGo = isAdminArtifact
+    ? progress?.status === 'done' || progress?.status === 'completing'
+    : ingestZipReceived(tour, serverIngest, progress, uploadComplete)
   const uploadStalled =
     pageState === 'pipeline' &&
+    !isAdminArtifact &&
     tour?.status === 'ingesting' &&
     !clientUploading &&
     !errorMessage &&
     progress?.status !== 'error' &&
     !zipOnGo
 
+  const selectedTourId = urlTourId ?? tourId
+  const adminStatus = adminPublishInfo?.status ?? null
+  const adminLive =
+    isAdminArtifact && adminStatus != null && ADMIN_DONE_STATUSES.has(adminStatus)
+  const liveTour = isAdminArtifact
+    ? adminLive
+    : tour?.status === 'ready' || tour?.status === 'completed'
+  const pipelineDone = isAdminArtifact
+    ? adminLive
+    : tour?.status === 'completed'
+
+  const pipelineTour: Tour | null =
+    isAdminArtifact && adminLive
+      ? ({
+          ...(tour ?? ({ tour_id: selectedTourId ?? '', name: '', status: 'completed' } as Tour)),
+          status: 'completed',
+          processing_stage: 'completed',
+          cleanup_completed_at:
+            adminPublishInfo?.lastSuccessAt ?? tour?.cleanup_completed_at ?? new Date().toISOString(),
+          ready_at: adminPublishInfo?.lastSuccessAt ?? tour?.ready_at ?? null,
+          viewer_url: adminPublishInfo?.publishUrl ?? null,
+          uploadComplete: true,
+          zipOnR2: true,
+        } as Tour)
+      : isAdminArtifact
+        ? // Keep tour name/id for display, but strip viewer pipeline signals from step builder.
+          tour
+          ? ({
+              ...tour,
+              status: zipOnGo || pageState === 'pipeline' ? 'processing' : 'draft',
+              processing_stage:
+                zipOnGo || pageState === 'pipeline'
+                  ? (adminStatus && ADMIN_ACTIVE_STATUSES.has(adminStatus)
+                      ? adminStatus
+                      : 'publishing')
+                  : null,
+              uploadComplete: false,
+              zipOnR2: false,
+              canResumeProcessing: false,
+              progress_total_files: null,
+              progress_current_files: null,
+              progress_total_bytes: null,
+              progress_current_bytes: null,
+              ready_at: null,
+              backup_completed_at: null,
+              cleanup_completed_at: null,
+              viewer_url: adminPublishInfo?.publishUrl ?? null,
+              processing_error: null,
+            } as Tour)
+          : null
+        : tour
+
   const steps = buildSteps({
     pageState,
     r2: progress,
-    tour,
+    tour: pipelineTour,
     r2ElapsedMs,
     nowMs: clockMs,
     frozenStepElapsed,
     stageMarkers: stageMarkersRef.current,
     pipelineError: errorMessage,
-    uploadComplete,
-    serverIngest,
+    uploadComplete: isAdminArtifact ? zipOnGo || adminLive : uploadComplete,
+    serverIngest: isAdminArtifact ? null : serverIngest,
     clientUploading,
     ingestPollError,
     uploadStalled,
@@ -1336,7 +1513,6 @@ export function UploadPage() {
   const showCheckingBanner = healthChecking && (!health || processorDown)
   const showDisconnectedBanner = processorDown && !healthChecking
   const needsNewUpload = !uploadComplete || showReupload
-  const selectedTourId = urlTourId ?? tourId
   const canStart =
     !!selectedFile &&
     !!selectedTourId &&
@@ -1347,34 +1523,40 @@ export function UploadPage() {
     !loadingTours &&
     !loadingTour
 
-  const liveTour = tour?.status === 'ready' || tour?.status === 'completed'
-  const pipelineDone = tour?.status === 'completed'
-
   const selectedTourMeta = selectedTourId
     ? tours.find((item) => item.id === selectedTourId)
     : undefined
   const displayTourName =
     tour?.name ?? selectedTourMeta?.name ?? locationState?.tourName ?? null
-  const displayTourStatus = tour?.status ?? selectedTourMeta?.status
-  const tourViewerUrl = selectedTourId
-    ? resolveTourViewerUrl(selectedTourId, tour?.viewer_url)
-    : null
-  const tourUrlIsLive = liveTour && !!tour?.viewer_url
+  const displayTourStatus = isAdminArtifact
+    ? (adminStatus as Tour['status'] | null) ?? null
+    : (tour?.status ?? selectedTourMeta?.status)
+  const tourViewerUrl = isAdminArtifact
+    ? adminPublishInfo?.publishUrl ??
+      (selectedTourId && adminPublishInfo?.publicDomain
+        ? `https://${adminPublishInfo.publicDomain.replace(/^https?:\/\//, '').replace(/\/$/, '')}/${selectedTourId}/`
+        : null)
+    : selectedTourId
+      ? resolveTourViewerUrl(selectedTourId, tour?.viewer_url)
+      : null
+  const tourUrlIsLive = isAdminArtifact
+    ? adminLive && !!tourViewerUrl
+    : liveTour && !!tour?.viewer_url
 
   async function copyTourUrl() {
     if (!tourViewerUrl) return
     try {
       await navigator.clipboard.writeText(tourViewerUrl)
-      toast.success('Tour URL copied')
+      toast.success(isAdminArtifact ? 'Admin URL copied' : 'Tour URL copied')
     } catch {
-      toast.error('Could not copy tour URL')
+      toast.error('Could not copy URL')
     }
   }
 
   const showOverallEta =
     pageState === 'pipeline' &&
     !pipelineDone &&
-    tour?.status !== 'failed' &&
+    (isAdminArtifact ? adminStatus !== 'failed' : tour?.status !== 'failed') &&
     progress?.status !== 'error' &&
     progress?.status !== 'aborted'
 
@@ -1383,12 +1565,16 @@ export function UploadPage() {
   return (
     <div className="flex flex-col gap-0">
       <PageHeader
-        title="Upload Tour"
-        description="Select an existing tour, then upload its ZIP. Tours must be created first — the upload uses the tour id as the storage folder."
+        title={isAdminArtifact ? 'Upload Admin Package' : 'Upload Tour'}
+        description={
+          isAdminArtifact
+            ? 'Upload the tour-admin ZIP package for this tour. Stored in a separate R2 bucket; does not change tour viewer status.'
+            : 'Select an existing tour, then upload its ZIP. Tours must be created first — the upload uses the tour id as the storage folder.'
+        }
         breadcrumbs={[
           { label: 'Dashboard', href: '/' },
           { label: 'Tours', href: '/tours' },
-          { label: 'Upload' },
+          { label: isAdminArtifact ? 'Admin package' : 'Upload' },
         ]}
       />
 
@@ -1534,7 +1720,8 @@ export function UploadPage() {
                     {tourViewerUrl && (
                       <div className="space-y-1 border-t border-border/60 pt-2">
                         <p className="font-medium text-foreground/90">
-                          Tour URL{tourUrlIsLive ? '' : ' (after upload)'}
+                          {isAdminArtifact ? 'Admin URL' : 'Tour URL'}
+                          {tourUrlIsLive ? '' : ' (after upload)'}
                         </p>
                         <div className="flex items-stretch gap-1.5">
                           <div
@@ -1569,8 +1756,9 @@ export function UploadPage() {
                         </div>
                         {!tourUrlIsLive && (
                           <p className="text-[10px] leading-relaxed">
-                            This is the public viewer link for this tour ID. It works once processing
-                            finishes — copy it now to share with your team.
+                            {isAdminArtifact
+                              ? 'Public admin package URL for this tour ID. It works once admin processing finishes.'
+                              : 'This is the public viewer link for this tour ID. It works once processing finishes — copy it now to share with your team.'}
                           </p>
                         )}
                       </div>
@@ -1774,7 +1962,21 @@ export function UploadPage() {
                 Live status for every stage after you click Start Upload.
               </CardDescription>
             </div>
-            {tour && <StatusBadge status={tour.status} />}
+            {!isAdminArtifact && tour ? (
+              <StatusBadge status={tour.status} />
+            ) : isAdminArtifact &&
+              adminStatus &&
+              (ADMIN_ACTIVE_STATUSES.has(adminStatus) || ADMIN_DONE_STATUSES.has(adminStatus)) ? (
+              <StatusBadge
+                status={
+                  (ADMIN_DONE_STATUSES.has(adminStatus)
+                    ? 'completed'
+                    : adminStatus === 'ingesting' || adminStatus === 'uploading'
+                      ? 'ingesting'
+                      : 'processing') as Tour['status']
+                }
+              />
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-4">
             {loadingTour ? (
@@ -1785,7 +1987,9 @@ export function UploadPage() {
             ) : pageState === 'form' && !progress && !uploadComplete ? (
               <div className="rounded-md border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
                 {selectedTourId
-                  ? 'Pipeline progress will appear here once upload starts.'
+                  ? isAdminArtifact
+                    ? 'Admin package pipeline will appear here once upload starts. Viewer tour ZIP status is ignored.'
+                    : 'Pipeline progress will appear here once upload starts.'
                   : 'Select a tour on the left, then upload its ZIP to see pipeline progress here.'}
               </div>
             ) : (
@@ -1971,10 +2175,18 @@ export function UploadPage() {
                     <Button asChild size="sm">
                       <Link to="/tours">Back to tours</Link>
                     </Button>
-                    {tour?.viewer_url && (
+                    {(isAdminArtifact ? adminPublishInfo?.publishUrl : tour?.viewer_url) && (
                       <Button asChild size="sm" variant="outline">
-                        <a href={tour.viewer_url} target="_blank" rel="noreferrer">
-                          Open viewer
+                        <a
+                          href={
+                            (isAdminArtifact
+                              ? adminPublishInfo?.publishUrl
+                              : tour?.viewer_url) ?? undefined
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {isAdminArtifact ? 'Open admin site' : 'Open viewer'}
                         </a>
                       </Button>
                     )}
