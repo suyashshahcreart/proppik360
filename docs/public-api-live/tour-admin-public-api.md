@@ -4,7 +4,7 @@
 **API prefix:** `/api/tour-admin`  
 **Live docs:** https://360.proppik.cloud/api-docs/
 
-This document covers **two public API groups** for integrators (tour viewer / admin apps). They do **not** use the SaaS platform login cookie.
+This document covers **public API groups** for integrators (tour viewer / admin apps and open catalogs). Groups **1** and **6** use tour-admin auth; **7** and **8** are open (no login).
 
 | # | Group | Prefix |
 |---|--------|--------|
