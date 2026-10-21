@@ -10,6 +10,8 @@ This document covers **two public API groups** for integrators (tour viewer / ad
 |---|--------|--------|
 | 1 | Tour login (password + OTP) | `/api/tour-admin/:tourId/...` |
 | 6 | Viewer bucket file system | `/api/tour-admin/:tourId/fs/...` |
+| 7 | Open tours catalog (no auth) | `/api/public/tours` |
+| 8 | Open customers catalog (no auth) | `/api/public/customers` |
 
 Alternative API host (same backend): `https://api360.proppik.cloud`
 
@@ -246,6 +248,47 @@ Variables:
 | `tourId` | Your 6-digit tour id |
 | `tourAdminToken` | Set automatically after login requests |
 | `fsPath` / `fsFilePath` | Examples for FS calls |
+
+---
+
+## 7. Public — Open tours catalog
+
+No login and no token. Soft-deleted tours are omitted. Internal fields (`owner_id`, `upload_id`, `r2_key`) are stripped.
+
+### GET `/api/public/tours`
+
+| Query | Example | Notes |
+|-------|---------|--------|
+| `tour_id` | `000002` | Exact 6-digit id |
+| `customer_id` | UUID | Client row id |
+| `client` | `Acme` | Matches customer id, first/last name, or company |
+| `date_from` / `from` | `2026-01-01` | `created_at` start (YYYY-MM-DD or ISO) |
+| `date_to` / `to` | `2026-12-31` | `created_at` end |
+| `page` | `1` | Default 1 |
+| `per_page` | `50` | Default 50, max 200 |
+
+**Local:** `http://127.0.0.1:8787/api/public/tours`  
+**Live:** `https://360.proppik.cloud/api/public/tours`
+
+---
+
+## 8. Public — Open customers catalog
+
+No login and no token. Soft-deleted customers are omitted. `owner_id` is stripped. Each item includes `tour_count`.
+
+### GET `/api/public/customers`
+
+| Query | Example | Notes |
+|-------|---------|--------|
+| `customer_id` | UUID | Exact client id |
+| `client` | `Acme` | Matches id, name, company, email, mobile |
+| `date_from` / `from` | `2026-01-01` | `created_at` start |
+| `date_to` / `to` | `2026-12-31` | `created_at` end |
+| `page` | `1` | Default 1 |
+| `per_page` | `50` | Default 50, max 200 |
+
+**Local:** `http://127.0.0.1:8787/api/public/customers`  
+**Live:** `https://360.proppik.cloud/api/public/customers`
 
 ---
 

@@ -15,7 +15,11 @@
     { "key": "saasEmail", "value": "admin@example.com" },
     { "key": "saasPassword", "value": "" },
     { "key": "fsPath", "value": "assets" },
-    { "key": "fsFilePath", "value": "assets/custom/note.json" }
+    { "key": "fsFilePath", "value": "assets/custom/note.json" },
+    { "key": "customerId", "value": "" },
+    { "key": "client", "value": "" },
+    { "key": "dateFrom", "value": "2026-01-01" },
+    { "key": "dateTo", "value": "2026-12-31" }
   ],
   "item": [
     {
@@ -572,6 +576,74 @@
             ],
             "url": "{{apiBase}}/api/tour-admin/{{tourId}}/fs/object?path=assets/custom&recursive=true",
             "description": "Deletes up to 200 keys under the folder prefix. `truncated: true` means call again."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Public — Open tours catalog (no auth)",
+      "description": "No login or token. GET /api/public/tours with optional tour_id, customer_id, client, date_from, date_to.",
+      "item": [
+        {
+          "name": "List all tours",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/public/tours"
+          }
+        },
+        {
+          "name": "Filter by tour_id",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/public/tours?tour_id={{tourId}}"
+          }
+        },
+        {
+          "name": "Filter by client / customer_id",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/public/tours?customer_id={{customerId}}&client={{client}}"
+          }
+        },
+        {
+          "name": "Filter by date range",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/public/tours?date_from={{dateFrom}}&date_to={{dateTo}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Public — Open customers catalog (no auth)",
+      "description": "No login or token. GET /api/public/customers with optional customer_id, client, date_from, date_to.",
+      "item": [
+        {
+          "name": "List all customers",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/public/customers"
+          }
+        },
+        {
+          "name": "Filter by customer_id",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/public/customers?customer_id={{customerId}}"
+          }
+        },
+        {
+          "name": "Filter by client search",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/public/customers?client={{client}}"
+          }
+        },
+        {
+          "name": "Filter by date range",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/public/customers?date_from={{dateFrom}}&date_to={{dateTo}}"
           }
         }
       ]

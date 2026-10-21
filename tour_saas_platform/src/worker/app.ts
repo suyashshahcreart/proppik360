@@ -16,10 +16,14 @@ import { propertyTypeRoutes } from './routes/property-types'
 import { processorStatusRoutes } from './routes/processor-status'
 import { tourAdminPublicRoutes } from './routes/tour-admin-public'
 import { tourAdminFsRoutes } from './routes/tour-admin-fs'
+import { publicToursRoutes } from './routes/public-tours'
 import type { Env, Variables } from './types'
 
 function allowedCorsOrigins(env: Env, path: string): string[] {
   const origins = [env.CORS_ORIGIN]
+  if (path.startsWith('/api/public')) {
+    return ['*']
+  }
   if (path.startsWith('/api/tour-admin')) {
     const extra = env.TOUR_ADMIN_CORS_ORIGINS?.split(',') ?? []
     for (const item of extra) {
@@ -35,14 +39,22 @@ export const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 app.use('/api/*', async (c, next) => {
   const requestOrigin = c.req.header('Origin')
   const allowed = allowedCorsOrigins(c.env, c.req.path)
-  const matched = requestOrigin && allowed.includes(requestOrigin) ? requestOrigin : null
+  const allowAny = allowed.includes('*')
+  const matched =
+    allowAny && requestOrigin
+      ? requestOrigin
+      : requestOrigin && allowed.includes(requestOrigin)
+        ? requestOrigin
+        : allowAny
+          ? '*'
+          : null
 
   if (c.req.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
       headers: {
         'Access-Control-Allow-Origin': matched ?? allowed[0],
-        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Allow-Credentials': allowAny ? 'false' : 'true',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'Access-Control-Allow-Headers':
           'Content-Type, Authorization, X-Tour-Admin-Api-Key, X-Session-Id, X-Chunk-Number',
@@ -56,7 +68,9 @@ app.use('/api/*', async (c, next) => {
 
   if (matched) {
     c.header('Access-Control-Allow-Origin', matched)
-    c.header('Access-Control-Allow-Credentials', 'true')
+    if (!allowAny) {
+      c.header('Access-Control-Allow-Credentials', 'true')
+    }
     c.header('Vary', 'Origin')
   }
 })
@@ -75,6 +89,7 @@ app.route('/api/system', processorStatusRoutes)
 app.route('/api/system', systemRoutes)
 app.route('/api/tour-admin', tourAdminPublicRoutes)
 app.route('/api/tour-admin/:tourId/fs', tourAdminFsRoutes)
+app.route('/api/public', publicToursRoutes)
 
 app.get('/health', (c) => c.json({ ok: true, service: 'proppik360-api' }))
 
