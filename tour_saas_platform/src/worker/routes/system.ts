@@ -73,7 +73,16 @@ import {
   settingsPatchSchema,
   tourAdminMasterPutSchema,
   tourAdminTemplateBodySchema,
+  systemCachePurgeSchema,
 } from '../utils/validation'
+import {
+  CachePurgeNotConfiguredError,
+  MAX_BULK_TOUR_PURGE,
+  PURGE_ALL_CONFIRM_PHRASE,
+  purgeCustom,
+  purgeEverything,
+  purgeTourCache,
+} from '../services/cloudflare-cache'
 import type { Env, Variables } from '../types'
 
 function settingFlag(v: unknown): string {
@@ -581,6 +590,90 @@ system.put(
     }
   },
 )
+
+// ── POST /api/system/cache/purge ──────────────────────────────
+system.post('/cache/purge', requirePermission('setting_cache_purge'), async (c) => {
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json(err('INVALID_INPUT', 'Request body must be valid JSON'), 422)
+  }
+
+  const parsed = systemCachePurgeSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json(err('INVALID_INPUT', parsed.error.errors[0].message), 422)
+  }
+
+  const actor = c.get('user')
+
+  try {
+    if (parsed.data.type === 'tours') {
+      const tourIds = [...new Set(parsed.data.tourIds.map((id) => id.trim()))].slice(
+        0,
+        MAX_BULK_TOUR_PURGE,
+      )
+      const results = []
+      let allOk = true
+      for (const tid of tourIds) {
+        const result = await purgeTourCache(c.env, tid)
+        results.push({
+          tourId: tid,
+          mode: result.mode,
+          purgedPrefixes: result.prefixes,
+          fileCount: result.fileCount,
+          success: result.cloudflare.success,
+          error: result.cloudflare.errors?.[0]?.message,
+        })
+        if (!result.cloudflare.success) allOk = false
+      }
+      await logActivity(c.env.DB, actor.id, 'cache_purge_bulk', 'cache', null, {
+        tourIds,
+        results,
+      })
+      return c.json(
+        ok({ results, success: allOk }),
+        allOk ? 200 : 502,
+      )
+    }
+
+    if (parsed.data.type === 'everything') {
+      if (parsed.data.confirmPhrase !== PURGE_ALL_CONFIRM_PHRASE) {
+        return c.json(
+          err('INVALID_INPUT', `Confirmation phrase must be exactly: ${PURGE_ALL_CONFIRM_PHRASE}`),
+          422,
+        )
+      }
+      const cf = await purgeEverything(c.env)
+      await logActivity(c.env.DB, actor.id, 'cache_purge_everything', 'cache', null, {
+        cloudflareSuccess: cf.success,
+      })
+      if (!cf.success) {
+        const msg = cf.errors?.[0]?.message ?? 'Cloudflare purge everything failed'
+        return c.json(err('UPSTREAM_ERROR', msg, { cloudflare: cf }), 502)
+      }
+      return c.json(ok({ message: 'Entire zone cache purge requested', cloudflare: cf }))
+    }
+
+    const cf = await purgeCustom(c.env, parsed.data.mode, parsed.data.values)
+    await logActivity(c.env.DB, actor.id, 'cache_purge_custom', 'cache', null, {
+      mode: parsed.data.mode,
+      values: parsed.data.values,
+      cloudflareSuccess: cf.success,
+    })
+    if (!cf.success) {
+      const msg = cf.errors?.[0]?.message ?? 'Cloudflare custom purge failed'
+      return c.json(err('UPSTREAM_ERROR', msg, { cloudflare: cf }), 502)
+    }
+    return c.json(ok({ message: 'Custom cache purge completed', cloudflare: cf }))
+  } catch (e) {
+    if (e instanceof CachePurgeNotConfiguredError) {
+      return c.json(err('SERVICE_UNAVAILABLE', e.message), 503)
+    }
+    const message = e instanceof Error ? e.message : 'Cache purge failed'
+    return c.json(err('INVALID_INPUT', message), 422)
+  }
+})
 
 system.delete(
   '/tour-admin-master/templates/:id',

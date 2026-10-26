@@ -82,6 +82,15 @@ export interface Env {
 
   /** Comma-separated extra CORS origins allowed on /api/tour-admin/* */
   TOUR_ADMIN_CORS_ORIGINS?: string
+
+  /** Cloudflare API token with Zone Cache Purge (server-only secret). */
+  CLOUDFLARE_API_TOKEN?: string
+
+  /** Cloudflare zone ID for R2_PUBLIC_DOMAIN (e.g. proppik360.com). */
+  CLOUDFLARE_ZONE_ID?: string
+
+  /** Optional separate zone when R2_ADMIN_PUBLIC_DOMAIN is on another zone. */
+  CLOUDFLARE_ADMIN_ZONE_ID?: string
 }
 
 /**

@@ -52,6 +52,7 @@ import { ListBox } from '@/components/shared/ListBox'
 import { ShareLinksRow, ShareUrlField } from '@/components/shared/ShareUrlField'
 import { PermissionGate, can } from '@/components/shared/PermissionGate'
 import { TourThumbnailButton } from '@/components/tours/TourThumbnailButton'
+import { TourCachePurgeButton } from '@/components/tours/TourCachePurgeButton'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -373,6 +374,13 @@ export function TourViewPage({ user }: { user: AuthUser }) {
                     Open viewer
                   </a>
                 </Button>
+              )}
+              {tour && (
+                <TourCachePurgeButton
+                  tourId={tour.tour_id}
+                  user={user}
+                  isLive={tourViewerLive}
+                />
               )}
               {adminPublishUrl && (
                 <Button asChild size="sm" variant="outline">

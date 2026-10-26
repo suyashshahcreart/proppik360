@@ -441,3 +441,24 @@ export const tourAdminOtpVerifySchema = z.object({
 export const tourAdminFsMkdirSchema = z.object({
   path: z.string().min(1, 'path is required').max(512).trim(),
 })
+
+// ── CDN cache purge ───────────────────────────────────────────
+
+export const systemCachePurgeSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('tours'),
+    tourIds: z
+      .array(z.string().min(1).max(64).trim())
+      .min(1, 'Select at least one tour')
+      .max(50, 'At most 50 tours per request'),
+  }),
+  z.object({
+    type: z.literal('everything'),
+    confirmPhrase: z.string(),
+  }),
+  z.object({
+    type: z.literal('custom'),
+    mode: z.enum(['url', 'hostname', 'tag', 'prefix']),
+    values: z.array(z.string().min(1).max(2048)).min(1).max(100),
+  }),
+])

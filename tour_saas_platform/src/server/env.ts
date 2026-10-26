@@ -71,5 +71,8 @@ export function createRuntimeEnv(): Env {
     MSG91_AUTH_KEY: process.env.MSG91_AUTH_KEY || undefined,
     TOUR_ADMIN_API_KEY: process.env.TOUR_ADMIN_API_KEY || undefined,
     TOUR_ADMIN_CORS_ORIGINS: process.env.TOUR_ADMIN_CORS_ORIGINS?.trim() || undefined,
+    CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN?.trim() || undefined,
+    CLOUDFLARE_ZONE_ID: process.env.CLOUDFLARE_ZONE_ID?.trim() || undefined,
+    CLOUDFLARE_ADMIN_ZONE_ID: process.env.CLOUDFLARE_ADMIN_ZONE_ID?.trim() || undefined,
   }
 }

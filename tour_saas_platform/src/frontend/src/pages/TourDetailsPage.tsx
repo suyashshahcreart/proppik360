@@ -41,6 +41,7 @@ import type {
   User,
 } from '../types'
 import { TourAdminSection } from '@/components/tours/TourAdminSection'
+import { TourCachePurgeButton } from '@/components/tours/TourCachePurgeButton'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { ListBox } from '@/components/shared/ListBox'
 import { FormField } from '@/components/shared/FormField'
@@ -1193,6 +1194,15 @@ export function TourDetailsPage({ user }: { user: User }) {
                       />
                     ) : null}
                   </ShareLinksRow>
+                )}
+                {isEdit && linkTourId && (
+                  <div className="pt-2">
+                    <TourCachePurgeButton
+                      tourId={linkTourId}
+                      user={user}
+                      isLive={tourViewerLive}
+                    />
+                  </div>
                 )}
               </CollapsibleFormSection>
 

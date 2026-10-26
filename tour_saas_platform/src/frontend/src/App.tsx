@@ -150,7 +150,7 @@ export function App() {
             path="upload/:tourId?"
             element={
               <PermissionRoute user={user} permission="tour_create">
-                <UploadPage />
+                {user ? <UploadPage user={user} /> : null}
               </PermissionRoute>
             }
           />
@@ -213,6 +213,7 @@ export function App() {
                   'setting_general',
                   'setting_sms',
                   'setting_tour_admin',
+                  'setting_cache_purge',
                 ]}
               >
                 {user ? <SettingsPage user={user} /> : null}

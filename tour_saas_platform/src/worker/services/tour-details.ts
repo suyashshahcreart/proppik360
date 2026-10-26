@@ -21,7 +21,6 @@ import type {
 import { getCustomerByIdForOwner } from './customers'
 
 import { getPropertyCategory } from './property-categories'
-import { generateUniqueQrCode, randomQrCode } from '../utils/qr-code'
 
 export { generateUniqueQrCode, randomQrCode } from '../utils/qr-code'
 

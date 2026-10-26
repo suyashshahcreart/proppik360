@@ -61,6 +61,7 @@ export const NAV_SECTIONS: NavSection[] = [
           'setting_general',
           'setting_sms',
           'setting_tour_admin',
+          'setting_cache_purge',
         ],
       },
       { label: 'Users', to: '/system/users', icon: UserCog, permission: 'user_view' },

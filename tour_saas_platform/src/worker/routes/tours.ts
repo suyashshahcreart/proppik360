@@ -32,6 +32,8 @@ import {
 } from '../services/media'
 import { purgePrefix, purgePrefixS3, type R2Config } from '../services/r2'
 import { goIngestAbort } from '../services/processor-ingest'
+import { CachePurgeNotConfiguredError, purgeTourCache } from '../services/cloudflare-cache'
+import { logActivity } from '../services/activity'
 import { ok, err } from '../utils/response'
 import {
   createTourSchema,
@@ -376,6 +378,63 @@ tours.post(
           : 'INVALID_INPUT'
       const message = e instanceof Error ? e.message : 'Could not reset password'
       return c.json(err(code, message), code === 'NOT_FOUND' ? 404 : 422)
+    }
+  },
+)
+
+// ── POST /api/tours/:id/cache/purge ───────────────────────────
+tours.post(
+  '/:id/cache/purge',
+  authMiddleware,
+  requirePermission('cache_purge_tour'),
+  async (c) => {
+    const user = c.get('user')
+    const tourId = c.req.param('id')
+
+    const tour = await getTourByIdForOwner(c.env.DB, tourId, user.id)
+    if (!tour) {
+      return c.json(err('NOT_FOUND', 'Tour not found'), 404)
+    }
+
+    const publicId = tour.tour_id ?? tourId
+
+    try {
+      const result = await purgeTourCache(c.env, publicId)
+      await logActivity(c.env.DB, user.id, 'cache_purge_tour', 'tour', String(tour.id), {
+        tour_id: publicId,
+        mode: result.mode,
+        prefixes: result.prefixes,
+        fileCount: result.fileCount,
+        cloudflareSuccess: result.cloudflare.success,
+      })
+
+      if (!result.cloudflare.success) {
+        const msg =
+          result.cloudflare.errors?.[0]?.message ?? 'Cloudflare cache purge failed'
+        return c.json(
+          err('UPSTREAM_ERROR', msg, {
+            prefixes: result.prefixes,
+            mode: result.mode,
+            cloudflare: result.cloudflare,
+          }),
+          502,
+        )
+      }
+
+      return c.json(
+        ok({
+          tourId: publicId,
+          mode: result.mode,
+          purgedPrefixes: result.prefixes,
+          fileCount: result.fileCount,
+        }),
+      )
+    } catch (e) {
+      if (e instanceof CachePurgeNotConfiguredError) {
+        return c.json(err('SERVICE_UNAVAILABLE', e.message), 503)
+      }
+      const message = e instanceof Error ? e.message : 'Cache purge failed'
+      return c.json(err('INTERNAL_ERROR', message), 500)
     }
   },
 )

@@ -8,6 +8,27 @@ export function getR2PublicDomain(): string {
     .replace(/\/$/, '')
 }
 
+function getAdminPublicDomain(): string | null {
+  const raw = import.meta.env.VITE_R2_ADMIN_PUBLIC_DOMAIN as string | undefined
+  const trimmed = raw?.trim()
+  if (!trimmed) return null
+  return trimmed.replace(/^https?:\/\//, '').replace(/\/$/, '')
+}
+
+/** CDN prefix URLs cleared for one tour (mirrors server buildTourPurgePrefixes). */
+export function buildTourPurgePrefixUrls(tourId: string): string[] {
+  const pid = tourId.trim()
+  if (!pid) return []
+  const main = getR2PublicDomain()
+  const prefixes = [
+    `https://${main}/${pid}/`,
+    `https://${main}/tours/${pid}/`,
+  ]
+  const admin = getAdminPublicDomain()
+  if (admin) prefixes.push(`https://${admin}/${pid}/`)
+  return [...new Set(prefixes)]
+}
+
 /** Public viewer link after ZIP is published (same shape as API buildViewerUrl). */
 export function buildExpectedViewerUrl(tourId: string): string {
   const domain = getR2PublicDomain()

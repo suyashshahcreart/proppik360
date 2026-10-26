@@ -19,7 +19,8 @@ import { toast } from 'sonner'
 import { api } from '../services/api'
 import { GoIngestUploader, formatBytes } from '../services/uploader'
 import type { UploadProgress } from '../services/uploader'
-import type { Tour } from '../types'
+import type { Tour, User } from '../types'
+import { TourCachePurgeButton } from '@/components/tours/TourCachePurgeButton'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { TourThumbnailButton } from '@/components/tours/TourThumbnailButton'
 import { CreateTourQuickDialog } from '@/components/tours/CreateTourQuickDialog'
@@ -698,7 +699,7 @@ function StepIcon({ status }: { status: StepUiStatus }) {
   return <Circle className="size-5 text-muted-foreground/50" />
 }
 
-export function UploadPage() {
+export function UploadPage({ user }: { user: User }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { tourId: pathTourId } = useParams<{ tourId?: string }>()
@@ -1822,6 +1823,15 @@ export function UploadPage() {
                                 <ExternalLink className="size-3.5" />
                               </a>
                             </Button>
+                          ) : null}
+                          {selectedTourId ? (
+                            <TourCachePurgeButton
+                              tourId={selectedTourId}
+                              user={user}
+                              isLive={tourUrlIsLive}
+                              size="sm"
+                              className="h-8 shrink-0 px-2 text-xs"
+                            />
                           ) : null}
                         </div>
                         {!tourUrlIsLive && (

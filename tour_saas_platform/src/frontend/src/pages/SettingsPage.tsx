@@ -6,6 +6,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Users,
+  RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../services/api'
@@ -14,6 +15,7 @@ import { can, canAny, PermissionGate } from '@/components/shared/PermissionGate'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { ListBox } from '@/components/shared/ListBox'
 import { TourMasterAdminTab } from '@/components/settings/TourMasterAdminTab'
+import { CachePurgeSettingsTab } from '@/components/settings/CachePurgeSettingsTab'
 import {
   Msg91TemplatesDialog,
   type Msg91TemplateRow,
@@ -46,6 +48,7 @@ const SETTINGS_ANY = [
   'setting_general',
   'setting_sms',
   'setting_tour_admin',
+  'setting_cache_purge',
 ] as const
 
 function flagOn(map: Record<string, string | null>, key: string): boolean {
@@ -104,6 +107,9 @@ export function SettingsPage({ user }: { user: User }) {
       can(user, 'setting_edit')
     ) {
       tabs.push({ id: 'tour_admin', label: 'Tour Master Admin', icon: Users })
+    }
+    if (can(user, 'setting_cache_purge')) {
+      tabs.push({ id: 'cache_purge', label: 'Cache purge', icon: RefreshCw })
     }
     return tabs
   }, [user])
@@ -492,6 +498,12 @@ export function SettingsPage({ user }: { user: User }) {
           >
             <TabsContent value="tour_admin" className="mt-0">
               <TourMasterAdminTab user={user} />
+            </TabsContent>
+          </PermissionGate>
+
+          <PermissionGate user={user} permission="setting_cache_purge">
+            <TabsContent value="cache_purge" className="mt-0">
+              <CachePurgeSettingsTab user={user} />
             </TabsContent>
           </PermissionGate>
         </div>

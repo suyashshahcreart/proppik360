@@ -45,6 +45,29 @@ export interface TourDeleteProgress {
   r2Warning?: string | null
 }
 
+export type SystemCachePurgeRequest =
+  | { type: 'tours'; tourIds: string[] }
+  | { type: 'everything'; confirmPhrase: string }
+  | {
+      type: 'custom'
+      mode: 'url' | 'hostname' | 'tag' | 'prefix'
+      values: string[]
+    }
+
+export interface SystemCachePurgeResponse {
+  message?: string
+  success?: boolean
+  results?: Array<{
+    tourId: string
+    mode: string
+    purgedPrefixes: string[]
+    fileCount?: number
+    success: boolean
+    error?: string
+  }>
+  cloudflare?: unknown
+}
+
 /** API failure that can point at a form field. */
 export class ApiError extends Error {
   field?: string
@@ -129,6 +152,14 @@ export const api = {
       }>('/tours/form-options'),
 
     get: (id: string) => request<Tour>(`/tours/${id}`),
+
+    purgeCache: (id: string) =>
+      request<{
+        tourId: string
+        mode: 'prefix' | 'files'
+        purgedPrefixes: string[]
+        fileCount?: number
+      }>(`/tours/${id}/cache/purge`, { method: 'POST' }),
 
     tourAdmin: {
       get: (tourId: string) => request<TourAdminListResponse>(`/tours/${tourId}/tour-admin`),
@@ -664,6 +695,14 @@ export const api = {
       patch: (payload: Record<string, unknown> & { tab: 'general' | 'sms' }) =>
         request<SettingsMap>('/system/settings', {
           method: 'PATCH',
+          body: JSON.stringify(payload),
+        }),
+    },
+
+    cache: {
+      purge: (payload: SystemCachePurgeRequest) =>
+        request<SystemCachePurgeResponse>('/system/cache/purge', {
+          method: 'POST',
           body: JSON.stringify(payload),
         }),
     },
