@@ -26,6 +26,11 @@ import { toast } from 'sonner'
 import { api } from '../services/api'
 import { formatBytes } from '../services/uploader'
 import { uploadPagePath } from '@/lib/upload-routes'
+import {
+  copyTourViewerLink,
+  resolveAdminPublishUrl,
+  resolveTourViewerUrl,
+} from '@/lib/viewer-url'
 import type {
   FurnishType,
   ListingStatus,
@@ -44,7 +49,9 @@ import { StatCard } from '@/components/shared/StatCard'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { ListBox } from '@/components/shared/ListBox'
+import { ShareLinksRow, ShareUrlField } from '@/components/shared/ShareUrlField'
 import { PermissionGate, can } from '@/components/shared/PermissionGate'
+import { TourThumbnailButton } from '@/components/tours/TourThumbnailButton'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -181,6 +188,7 @@ export function TourViewPage({ user }: { user: AuthUser }) {
   const [history, setHistory] = useState<TourUploadHistoryEntry[]>([])
   const [adminHistory, setAdminHistory] = useState<TourUploadHistoryEntry[]>([])
   const [adminPublishUrl, setAdminPublishUrl] = useState<string | null>(null)
+  const [adminPublicDomain, setAdminPublicDomain] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -208,6 +216,7 @@ export function TourViewPage({ user }: { user: AuthUser }) {
         setHistory(historyData.history)
         setAdminHistory(adminHistoryData.history)
         setAdminPublishUrl(adminInfo?.publishUrl ?? null)
+        setAdminPublicDomain(adminInfo?.publicDomain ?? null)
 
         try {
           const mediaRes = await api.media.list({
@@ -249,6 +258,25 @@ export function TourViewPage({ user }: { user: AuthUser }) {
   const logo = media.find((m) => m.links.some((l) => l.collection === 'tour_logo'))
   const assets = media.filter((m) => m.links.some((l) => l.collection === 'tour_assets'))
   const pct = tour ? progressPercent(tour) : null
+
+  const tourViewerUrl = useMemo(
+    () => (tour ? resolveTourViewerUrl(tour.tour_id, tour.viewer_url) : null),
+    [tour],
+  )
+  const tourViewerLive = useMemo(
+    () =>
+      !!tour?.viewer_url &&
+      (tour.status === 'ready' || tour.status === 'completed'),
+    [tour],
+  )
+  const adminShareUrl = useMemo(
+    () =>
+      tour
+        ? resolveAdminPublishUrl(tour.tour_id, adminPublishUrl, adminPublicDomain)
+        : null,
+    [tour, adminPublishUrl, adminPublicDomain],
+  )
+  const adminShareLive = !!adminPublishUrl
 
   async function copyText(value: string, label: string) {
     try {
@@ -313,9 +341,34 @@ export function TourViewPage({ user }: { user: AuthUser }) {
                   </Link>
                 </Button>
               )}
-              {(tour.status === 'ready' || tour.status === 'completed') && tour.viewer_url && (
+              <TourThumbnailButton
+                tourId={tour.tour_id}
+                tourName={tour.name}
+                onUploaded={() => {
+                  void api.media
+                    .list({ entity_type: 'tour', entity_id: tour.tour_id, per_page: 50 })
+                    .then((res) => setMedia(res.items))
+                    .catch(() => undefined)
+                }}
+              />
+              {tourViewerUrl && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void copyTourViewerLink(tour.tour_id, tour.viewer_url)
+                      .then(() => toast.success('Tour link copied'))
+                      .catch(() => toast.error('Could not copy tour link'))
+                  }}
+                >
+                  <Copy className="size-4" />
+                  Copy tour link
+                </Button>
+              )}
+              {tourViewerLive && tourViewerUrl && (
                 <Button asChild size="sm" variant="outline">
-                  <a href={tour.viewer_url} target="_blank" rel="noopener noreferrer">
+                  <a href={tourViewerUrl} target="_blank" rel="noopener noreferrer">
                     <ExternalLink className="size-4" />
                     Open viewer
                   </a>
@@ -416,6 +469,32 @@ export function TourViewPage({ user }: { user: AuthUser }) {
                 </div>
                 <Progress value={pct} />
               </div>
+            )}
+
+            {tourViewerUrl && (
+              <ShareLinksRow className="pt-4">
+                <ShareUrlField
+                  label="Tour link (public viewer)"
+                  url={tourViewerUrl}
+                  isLive={tourViewerLive}
+                  hintWhenDraft="Share this URL with clients. It goes live once tour processing finishes."
+                  className={!adminShareUrl ? 'sm:col-span-2' : undefined}
+                  onCopy={() =>
+                    copyTourViewerLink(tour.tour_id, tour.viewer_url).then(() =>
+                      toast.success('Tour link copied'),
+                    )
+                  }
+                />
+                {adminShareUrl ? (
+                  <ShareUrlField
+                    label="Admin site link"
+                    url={adminShareUrl}
+                    isLive={adminShareLive}
+                    hintWhenDraft="Public admin package URL for this tour. Available after admin ZIP processing."
+                    onCopy={() => copyText(adminShareUrl, 'Admin link')}
+                  />
+                ) : null}
+              </ShareLinksRow>
             )}
           </CardContent>
         </Card>
@@ -643,7 +722,7 @@ export function TourViewPage({ user }: { user: AuthUser }) {
               <EmptyState
                 icon={ImageIcon}
                 title="No media yet"
-                description="Upload a thumbnail or assets from the tours list or edit flow."
+                description="Use Tour Thumbnail in the header to add a cover image, or attach logo and assets from edit."
               />
             ) : (
               <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 md:grid-cols-4">
@@ -693,13 +772,28 @@ export function TourViewPage({ user }: { user: AuthUser }) {
                       : '—'
                   }
                 />
-                {(tour.status === 'ready' || tour.status === 'completed') && tour.viewer_url && (
+                {tourViewerUrl && (
                   <InfoRow
                     icon={ExternalLink}
-                    label="Viewer URL"
-                    value={tour.viewer_url.replace(/^https?:\/\//, '')}
-                    href={tour.viewer_url}
-                    external
+                    label="Tour link"
+                    value={tourViewerUrl.replace(/^https?:\/\//, '')}
+                    href={tourViewerLive ? tourViewerUrl : undefined}
+                    external={tourViewerLive}
+                    action={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        onClick={() => {
+                          void copyTourViewerLink(tour.tour_id, tour.viewer_url)
+                            .then(() => toast.success('Tour link copied'))
+                            .catch(() => toast.error('Could not copy tour link'))
+                        }}
+                      >
+                        <Copy className="size-3.5" />
+                      </Button>
+                    }
                   />
                 )}
               </div>

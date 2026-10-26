@@ -105,7 +105,7 @@ export function App() {
             path="dashboard"
             element={
               <PermissionRoute user={user} permission="dashboard_view">
-                <DashboardPage />
+                {user ? <DashboardPage user={user} /> : null}
               </PermissionRoute>
             }
           />

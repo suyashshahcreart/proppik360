@@ -12,6 +12,8 @@ import {
   Clock,
   Copy,
   ExternalLink,
+  Repeat2,
+  Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../services/api'
@@ -19,6 +21,8 @@ import { GoIngestUploader, formatBytes } from '../services/uploader'
 import type { UploadProgress } from '../services/uploader'
 import type { Tour } from '../types'
 import { PageHeader } from '@/components/shared/PageHeader'
+import { TourThumbnailButton } from '@/components/tours/TourThumbnailButton'
+import { CreateTourQuickDialog } from '@/components/tours/CreateTourQuickDialog'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { TourSearchSelect, type TourOption } from '@/components/shared/TourSearchSelect'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -29,6 +33,7 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import {
   resolveUploadArtifact,
@@ -730,6 +735,7 @@ export function UploadPage() {
   const [loadingTour, setLoadingTour] = useState(false)
   const [saveBackupZip, setSaveBackupZip] = useState(false)
   const [adminPublishInfo, setAdminPublishInfo] = useState<AdminPublishInfo | null>(null)
+  const [createTourOpen, setCreateTourOpen] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploaderRef = useRef<GoIngestUploader | null>(null)
@@ -1216,14 +1222,36 @@ export function UploadPage() {
     }
   }
 
-  const handleTourSelect = (id: string) => {
-    if (!id || id === tourId) return
+  const handleTourSelect = (id: string, name?: string) => {
+    if (!id || id === (urlTourId ?? tourId)) return
     setErrorMessage(null)
     setTourId(id)
     setAdminPublishInfo(null)
+    setPageState('form')
     navigate(uploadPagePath(id, isAdminArtifact ? { artifact: 'tour_admin' } : undefined), {
       replace: true,
-      state: { tourId: id, tourName: tours.find((item) => item.id === id)?.name },
+      state: { tourId: id, tourName: name ?? tours.find((item) => item.id === id)?.name },
+    })
+  }
+
+  function handleTourCreated(created: Tour) {
+    setTours((current) => {
+      const next = current.filter((item) => item.id !== created.tour_id)
+      next.push({ id: created.tour_id, name: created.name, status: created.status })
+      return next.sort((a, b) => a.name.localeCompare(b.name))
+    })
+    setErrorMessage(null)
+    setTour(created)
+    setTourId(created.tour_id)
+    setAdminPublishInfo(null)
+    setPageState('form')
+    setProgress(null)
+    setShowReupload(false)
+    setSelectedFile(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    navigate(uploadPagePath(created.tour_id, isAdminArtifact ? { artifact: 'tour_admin' } : undefined), {
+      replace: true,
+      state: { tourId: created.tour_id, tourName: created.name },
     })
   }
 
@@ -1577,6 +1605,11 @@ export function UploadPage() {
           { label: 'Tours', href: '/tours' },
           { label: isAdminArtifact ? 'Admin package' : 'Upload' },
         ]}
+        actions={
+          selectedTourId ? (
+            <TourThumbnailButton tourId={selectedTourId} tourName={displayTourName} />
+          ) : null
+        }
       />
 
       {(showCheckingBanner || showDisconnectedBanner) && (
@@ -1670,29 +1703,65 @@ export function UploadPage() {
                     <Loader2 className="size-4 animate-spin" />
                     Loading tours…
                   </div>
-                ) : tours.length === 0 ? (
-                  <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-sm">
-                    <p className="text-muted-foreground">No tours yet. Create a tour before uploading a ZIP.</p>
-                    <Button type="button" variant="outline" size="sm" className="mt-2" asChild>
-                      <Link to="/tours/new">Create tour</Link>
-                    </Button>
-                  </div>
                 ) : (
-                  <TourSearchSelect
-                    value={selectedTourId ?? ''}
-                    onValueChange={handleTourSelect}
-                    tours={tours}
-                    disabled={pageState === 'pipeline'}
-                    placeholder="Choose a tour to upload…"
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <div className="min-w-0 flex-1">
+                      {tours.length === 0 ? (
+                        <div className="flex h-9 items-center rounded-md border border-input bg-card px-3 text-sm text-muted-foreground">
+                          No tours yet — add one
+                        </div>
+                      ) : (
+                        <TourSearchSelect
+                          value={selectedTourId ?? ''}
+                          onValueChange={handleTourSelect}
+                          tours={tours}
+                          disabled={clientUploading}
+                          placeholder="Choose a tour to upload…"
+                        />
+                      )}
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="size-9 shrink-0"
+                          onClick={() => setCreateTourOpen(true)}
+                          disabled={clientUploading}
+                          aria-label="New tour"
+                        >
+                          <Plus className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">New tour</TooltipContent>
+                    </Tooltip>
+                    {selectedTourId && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="size-9 shrink-0"
+                            onClick={handleNewTour}
+                            aria-label="Choose another tour"
+                          >
+                            <Repeat2 className="size-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">Choose another tour</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
                 )}
-                {!selectedTourId && tours.length > 0 && (
+                {!selectedTourId && !loadingTours && (
                   <p className="text-xs text-muted-foreground">
-                    Create a tour on{' '}
+                    Use + to add a tour here, or open the full{' '}
                     <Link to="/tours/new" className="text-primary hover:underline">
-                      Create tour
+                      create tour
                     </Link>{' '}
-                    if it is not listed here.
+                    page.
                   </p>
                 )}
                 {selectedTourId && (
@@ -1869,7 +1938,7 @@ export function UploadPage() {
                 </p>
               )}
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center justify-center gap-2">
                 {canResume && pageState === 'form' && !showReupload && (
                   <Button
                     type="button"
@@ -1928,20 +1997,10 @@ export function UploadPage() {
                   </Button>
                 )}
                 {(pageState === 'error' || pipelineDone) && (
-                  <>
-                    <Button type="button" variant="outline" onClick={handleReset}>
-                      Upload another
-                    </Button>
-                    <Button type="button" variant="outline" onClick={handleNewTour}>
-                      Choose another tour
-                    </Button>
-                  </>
+                  <Button type="button" variant="outline" onClick={handleReset}>
+                    Upload another
+                  </Button>
                 )}
-                {urlTourId && pageState === 'form' && !pipelineDone && (
-                    <Button type="button" variant="outline" onClick={handleNewTour}>
-                      Choose another tour
-                    </Button>
-                  )}
               </div>
             </form>
 
@@ -2199,6 +2258,12 @@ export function UploadPage() {
           </CardContent>
         </Card>
       </div>
+
+      <CreateTourQuickDialog
+        open={createTourOpen}
+        onOpenChange={setCreateTourOpen}
+        onCreated={handleTourCreated}
+      />
     </div>
   )
 }

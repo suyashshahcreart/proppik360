@@ -209,11 +209,13 @@ export interface DashboardStats {
     failed: number
   }
   recentTours: Array<{
-    id: string
+    id: number
+    tour_id: string
     name: string
     status: TourStatus
     file_size: number | null
     original_filename: string | null
+    viewer_url: string | null
     created_at: string
     updated_at: string
   }>

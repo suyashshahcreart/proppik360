@@ -41,21 +41,22 @@ dashboard.get('/stats', authMiddleware, requirePermission('dashboard_view'), asy
     if (row.status === 'failed') stats.failed += row.count
   }
 
-  // Fetch the 5 most recently created tours
   const recentResult = await c.env.DB.prepare(
-    `SELECT id, name, status, file_size, original_filename, created_at, updated_at
+    `SELECT id, tour_id, name, status, file_size, original_filename, viewer_url, created_at, updated_at
      FROM tours
      WHERE owner_id = ? AND deleted_at IS NULL
      ORDER BY created_at DESC
-     LIMIT 5`,
+     LIMIT 8`,
   )
     .bind(user.id)
     .all<{
-      id: string
+      id: number
+      tour_id: string
       name: string
       status: string
       file_size: number | null
       original_filename: string | null
+      viewer_url: string | null
       created_at: string
       updated_at: string
     }>()

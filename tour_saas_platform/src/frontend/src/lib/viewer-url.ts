@@ -24,6 +24,16 @@ export function resolveTourViewerUrl(
   return buildExpectedViewerUrl(tourId)
 }
 
+/** Copy only the public tour viewer URL (nothing else). */
+export async function copyTourViewerLink(
+  tourId: string,
+  viewerUrl?: string | null,
+): Promise<string> {
+  const url = resolveTourViewerUrl(tourId, viewerUrl)
+  await navigator.clipboard.writeText(url)
+  return url
+}
+
 function normalizeAdminEntryUrl(url: string): string {
   const trimmed = url.trim()
   if (!trimmed) return trimmed

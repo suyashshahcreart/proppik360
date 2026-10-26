@@ -24,6 +24,7 @@ interface DataTableProps<T> {
   skeletonRows?: number
   emptyState?: ReactNode
   onRowClick?: (row: T) => void
+  onRowDoubleClick?: (row: T) => void
   rowClassName?: (row: T) => string | undefined
 }
 
@@ -37,6 +38,7 @@ export function DataTable<T>({
   skeletonRows = 5,
   emptyState,
   onRowClick,
+  onRowDoubleClick,
   rowClassName,
 }: DataTableProps<T>) {
   const [sortKey, setSortKey] = useState<string | null>(null)
@@ -133,8 +135,14 @@ export function DataTable<T>({
           : sortedData.map((row) => (
               <TableRow
                 key={keyExtractor(row)}
+                title={onRowDoubleClick ? 'Double-click to copy the tour link' : undefined}
                 onClick={() => onRowClick?.(row)}
-                className={cn(onRowClick && 'cursor-pointer', rowClassName?.(row))}
+                onDoubleClick={(event) => {
+                  const target = event.target as HTMLElement
+                  if (target.closest('a, button, input, textarea, [role="menuitem"]')) return
+                  onRowDoubleClick?.(row)
+                }}
+                className={cn((onRowClick || onRowDoubleClick) && 'cursor-pointer', rowClassName?.(row))}
               >
                 {columns.map((col) => (
                   <TableCell key={col.key} className={col.className}>

@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import {
   Compass,
   Plus,
-  ImageIcon,
   ExternalLink,
   Loader2,
   RotateCcw,
@@ -12,6 +11,7 @@ import {
   Workflow,
   Pencil,
   Upload,
+  Package,
   Eye,
 } from 'lucide-react'
 import { api } from '../services/api'
@@ -26,11 +26,11 @@ import { ListBox } from '@/components/shared/ListBox'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { RowActions, RowActionButton } from '@/components/shared/RowActions'
 import { useListControls } from '@/hooks/useListControls'
-import { FileDropzone } from '@/components/media/FileDropzone'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { toast } from 'sonner'
 import { uploadPagePath } from '@/lib/upload-routes'
+import { copyTourViewerLink } from '@/lib/viewer-url'
 // ── Constants ─────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = 2500
@@ -211,8 +211,6 @@ export function ToursPage({ user }: { user: User }) {
   const [resumingId, setResumingId] = useState<string | null>(null)
   const wasOfflineRef = useRef(false)
 
-  const [thumbnailTour, setThumbnailTour] = useState<Tour | null>(null)
-
   const [confirmTour, setConfirmTour] = useState<Tour | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -249,6 +247,15 @@ export function ToursPage({ user }: { user: User }) {
     filterFn: filterTours,
     defaultPageSize: 10,
   })
+
+  async function copyTourLink(tour: Tour) {
+    try {
+      await copyTourViewerLink(tour.tour_id, tour.viewer_url)
+      toast.success('Tour link copied')
+    } catch {
+      toast.error('Could not copy tour link')
+    }
+  }
 
   async function resumeStuckTours(current: Tour[]) {
     const stuck = current.filter((t) =>
@@ -478,16 +485,6 @@ export function ToursPage({ user }: { user: User }) {
       className: 'text-right',
       render: (tour) => (
         <div className="flex items-center justify-end gap-2">
-          {tour.status === 'draft' && (
-            <RowActionButton
-              label="Upload"
-              tone="neutral"
-              to={uploadPagePath(tour.tour_id)}
-              state={{ tourId: tour.tour_id, tourName: tour.name }}
-            >
-              <Upload className="size-3.5" />
-            </RowActionButton>
-          )}
           {tour.status === 'ingesting' && (
             <div className="flex items-center gap-2">
               <ViewProcessButton tour={tour} />
@@ -591,6 +588,32 @@ export function ToursPage({ user }: { user: User }) {
             </div>
           )}
 
+          <PermissionGate user={user} permission="tour_create">
+            <RowActionButton
+              label={
+                tour.status === 'draft' || !tour.file_size
+                  ? 'Upload tour'
+                  : 'Re-upload tour'
+              }
+              tone="neutral"
+              to={uploadPagePath(tour.tour_id)}
+              state={{ tourId: tour.tour_id, tourName: tour.name }}
+            >
+              <Upload className="size-3.5" />
+            </RowActionButton>
+          </PermissionGate>
+
+          <PermissionGate user={user} permission="tour_admin_upload">
+            <RowActionButton
+              label="Upload / re-upload admin package"
+              tone="neutral"
+              to={uploadPagePath(tour.tour_id, { artifact: 'tour_admin' })}
+              state={{ tourId: tour.tour_id, tourName: tour.name }}
+            >
+              <Package className="size-3.5" />
+            </RowActionButton>
+          </PermissionGate>
+
           <RowActionButton label="View" tone="view" to={`/tours/${tour.tour_id}`}>
             <Eye className="size-3.5" />
           </RowActionButton>
@@ -604,11 +627,7 @@ export function ToursPage({ user }: { user: User }) {
           <RowActions
             onDelete={() => openConfirm(tour)}
             deleteDisabled={tour.status === 'uploading'}
-          >
-            <RowActionButton label="Upload thumbnail" tone="neutral" onClick={() => setThumbnailTour(tour)}>
-              <ImageIcon className="size-3.5" />
-            </RowActionButton>
-          </RowActions>
+          />
         </div>
       ),
     },
@@ -664,7 +683,7 @@ export function ToursPage({ user }: { user: User }) {
 
       <ListBox
         title="Tours List"
-        subtitle="Manage 360° tour uploads and processing status"
+        subtitle="Double-click a tour to copy its public viewer link"
         onRefresh={loadTours}
         refreshing={loading}
         search={list.search}
@@ -685,6 +704,7 @@ export function ToursPage({ user }: { user: User }) {
           data={list.paginated}
           keyExtractor={(t) => t.id}
           loading={loading}
+          onRowDoubleClick={(tour) => void copyTourLink(tour)}
           emptyState={
             <EmptyState
               icon={Compass}
@@ -705,28 +725,6 @@ export function ToursPage({ user }: { user: User }) {
           }
         />
       </ListBox>
-
-      {/* Thumbnail upload dialog */}
-      <Dialog open={!!thumbnailTour} onOpenChange={(open) => !open && setThumbnailTour(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Tour Thumbnail</DialogTitle>
-            <DialogDescription>
-              Upload a thumbnail image for <strong>{thumbnailTour?.name}</strong>. Replaces any existing thumbnail.
-            </DialogDescription>
-          </DialogHeader>
-          {thumbnailTour && (
-            <FileDropzone
-              collection="tour_thumbnail"
-              entityType="tour"
-              entityId={thumbnailTour.id}
-              accept="image/*"
-              maxBytes={5 * 1024 * 1024}
-              onUploaded={() => setThumbnailTour(null)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
 
       {/* Delete confirmation dialog */}
       <ConfirmDialog

@@ -14,12 +14,19 @@ import {
   Loader2,
   MapPin,
   Sofa,
+  ExternalLink,
   Upload,
   User as UserIcon,
   Warehouse,
 } from 'lucide-react'
 import { api, ApiError } from '../services/api'
 import { uploadPagePath } from '@/lib/upload-routes'
+import {
+  copyTourViewerLink,
+  resolveAdminPublishUrl,
+  resolveTourViewerUrl,
+} from '@/lib/viewer-url'
+import { ShareLinksRow, ShareUrlField } from '@/components/shared/ShareUrlField'
 import { can } from '@/components/shared/PermissionGate'
 import type {
   FurnishType,
@@ -430,6 +437,9 @@ export function TourDetailsPage({ user }: { user: User }) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [baseline, setBaseline] = useState('')
   const [tourStatus, setTourStatus] = useState<TourStatus | null>(null)
+  const [viewerUrlFromApi, setViewerUrlFromApi] = useState<string | null>(null)
+  const [adminPublishUrl, setAdminPublishUrl] = useState<string | null>(null)
+  const [adminPublicDomain, setAdminPublicDomain] = useState<string | null>(null)
   const [canEditIdentity, setCanEditIdentity] = useState(true)
   const [addressManual, setAddressManual] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
@@ -466,13 +476,19 @@ export function TourDetailsPage({ user }: { user: User }) {
         setCustomers(options.customers)
         setCategories(options.categories)
         if (tourId) {
-          const tour = await api.tours.get(tourId)
+          const [tour, adminInfo] = await Promise.all([
+            api.tours.get(tourId),
+            api.artifacts.tourAdmin.publishInfo(tourId).catch(() => null),
+          ])
           if (cancelled) return
           const loaded = formFromTour(tour)
           setForm(loaded)
           setBaseline(serializeForm(loaded, tour.qr_code ?? null))
           setQrCode(tour.qr_code ?? null)
           setTourStatus(tour.status)
+          setViewerUrlFromApi(tour.viewer_url ?? null)
+          setAdminPublishUrl(adminInfo?.publishUrl ?? null)
+          setAdminPublicDomain(adminInfo?.publicDomain ?? null)
           setCanEditIdentity(tour.canEditIdentity ?? false)
         } else {
           const initial = emptyForm()
@@ -484,6 +500,9 @@ export function TourDetailsPage({ user }: { user: User }) {
           setQrCode(draftQr)
           qrRef.current = draftQr
           setTourStatus(null)
+          setViewerUrlFromApi(null)
+          setAdminPublishUrl(null)
+          setAdminPublicDomain(null)
           setCanEditIdentity(true)
         }
       } catch (err) {
@@ -543,6 +562,29 @@ export function TourDetailsPage({ user }: { user: User }) {
     isOtherCategory(selectedType) && selectedSub != null && isOtherCategory(selectedSub)
   const stateOptions = statesForCountry(form.country).map((state) => ({ value: state, label: state }))
   const cityOptions = citiesForState(form.country, form.state).map((city) => ({ value: city, label: city }))
+
+  const linkTourId = (form.slug.trim() || tourId || '').trim()
+  const tourViewerUrl = useMemo(
+    () =>
+      /^\d{6}$/.test(linkTourId)
+        ? resolveTourViewerUrl(linkTourId, viewerUrlFromApi)
+        : null,
+    [linkTourId, viewerUrlFromApi],
+  )
+  const tourViewerLive = useMemo(
+    () =>
+      !!viewerUrlFromApi &&
+      (tourStatus === 'ready' || tourStatus === 'completed'),
+    [viewerUrlFromApi, tourStatus],
+  )
+  const adminShareUrl = useMemo(
+    () =>
+      isEdit && /^\d{6}$/.test(linkTourId)
+        ? resolveAdminPublishUrl(linkTourId, adminPublishUrl, adminPublicDomain)
+        : null,
+    [isEdit, linkTourId, adminPublishUrl, adminPublicDomain],
+  )
+  const adminShareLive = !!adminPublishUrl
 
   function messageFor(key: string, draft: FormState, draftQr: string | null): string | null {
     if (key === 'name') {
@@ -765,6 +807,7 @@ export function TourDetailsPage({ user }: { user: User }) {
         : await api.tours.create(payload.name, payload)
       setQrCode(saved.qr_code ?? null)
       setTourStatus(saved.status)
+      setViewerUrlFromApi(saved.viewer_url ?? null)
       setCanEditIdentity(saved.canEditIdentity ?? false)
       const savedForm = { ...form, slug: saved.tour_id }
       setForm(savedForm)
@@ -878,6 +921,29 @@ export function TourDetailsPage({ user }: { user: User }) {
                 </Badge>
               )}
               {tourStatus && <StatusBadge status={tourStatus} />}
+              {tourViewerUrl && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void copyTourViewerLink(linkTourId, viewerUrlFromApi)
+                      .then(() => toast.success('Tour link copied'))
+                      .catch(() => toast.error('Could not copy tour link'))
+                  }}
+                >
+                  <Copy className="size-4" />
+                  Copy tour link
+                </Button>
+              )}
+              {tourViewerLive && tourViewerUrl && (
+                <Button type="button" size="sm" variant="outline" asChild>
+                  <a href={tourViewerUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="size-4" />
+                    Open viewer
+                  </a>
+                </Button>
+              )}
               {isEdit && tourId && can(user, 'tour_admin_upload') && (
                 <Button type="button" size="sm" variant="outline" asChild>
                   <Link to={uploadPagePath(tourId, { artifact: 'tour_admin' })}>
@@ -1099,6 +1165,34 @@ export function TourDetailsPage({ user }: { user: User }) {
                     Tour ID is locked after the first ZIP upload — R2 files live at{' '}
                     <span className="font-mono">{form.slug || tourId}/index.html</span>
                   </p>
+                )}
+                {tourViewerUrl && (
+                  <ShareLinksRow>
+                    <ShareUrlField
+                      label="Tour link (public viewer)"
+                      url={tourViewerUrl}
+                      isLive={tourViewerLive}
+                      hintWhenDraft="Share this URL with clients. It goes live once tour processing finishes."
+                      className={!adminShareUrl ? 'sm:col-span-2' : undefined}
+                      onCopy={() =>
+                        copyTourViewerLink(linkTourId, viewerUrlFromApi).then(() =>
+                          toast.success('Tour link copied'),
+                        )
+                      }
+                    />
+                    {adminShareUrl ? (
+                      <ShareUrlField
+                        label="Admin site link"
+                        url={adminShareUrl}
+                        isLive={adminShareLive}
+                        hintWhenDraft="Public admin package URL for this tour. Available after admin ZIP processing."
+                        onCopy={async () => {
+                          await navigator.clipboard.writeText(adminShareUrl)
+                          toast.success('Admin link copied')
+                        }}
+                      />
+                    ) : null}
+                  </ShareLinksRow>
                 )}
               </CollapsibleFormSection>
 
