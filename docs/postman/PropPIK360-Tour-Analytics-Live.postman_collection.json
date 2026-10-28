@@ -1,0 +1,133 @@
+{
+  "info": {
+    "_postman_id": "proppik360-tour-analytics-live",
+    "name": "PropPIK360 — Tour Analytics (Live)",
+    "description": "Same as **PropPIK360-Tour-Analytics** with `apiBase` = **https://360.proppik.cloud**.\n\nDocs: `tour_saas_platform/docs/TOUR_ANALYTICS_POSTMAN.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "apiBase", "value": "https://360.proppik.cloud" },
+    { "key": "tourId", "value": "000002" },
+    { "key": "analyticsIngestKey", "value": "" },
+    { "key": "trackingKey", "value": "session:postman-test" },
+    { "key": "tourAdminToken", "value": "" },
+    { "key": "tourAdminApiKey", "value": "" },
+    { "key": "saasEmail", "value": "admin@example.com" },
+    { "key": "saasPassword", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. POST ingest — main tour (/api/public)",
+      "item": [
+        {
+          "name": "Upsert analytics snapshot (main_tour)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Analytics-Ingest-Key", "value": "{{analyticsIngestKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracking_key\": \"{{trackingKey}}\",\n  \"payload\": { \"visitors\": 1 }\n}"
+            },
+            "url": "{{apiBase}}/api/public/tours/{{tourId}}/analytics"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. POST ingest — tour admin",
+      "item": [
+        {
+          "name": "Upsert analytics snapshot (tour_admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Analytics-Ingest-Key", "value": "{{analyticsIngestKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracking_key\": \"admin:{{trackingKey}}\",\n  \"payload\": { \"event\": \"test\" }\n}"
+            },
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/analytics"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Helper — Tour admin login",
+      "item": [
+        {
+          "name": "Login — password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.response.code === 200 && j.data && j.data.token) {",
+                  "  pm.collectionVariables.set('tourAdminToken', j.data.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin-{{tourId}}\",\n  \"password\": \"your-password-here\"\n}"
+            },
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/login/password"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. GET — tour admin analytics",
+      "item": [
+        {
+          "name": "List history",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{tourAdminToken}}" }],
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/analytics"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Helper — SaaS login",
+      "item": [
+        {
+          "name": "POST /api/auth/login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{saasEmail}}\",\n  \"password\": \"{{saasPassword}}\"\n}"
+            },
+            "url": "{{apiBase}}/api/auth/login"
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. GET — SaaS analytics",
+      "item": [
+        {
+          "name": "List history (all sources)",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/tours/{{tourId}}/analytics"
+          }
+        }
+      ]
+    }
+  ]
+}

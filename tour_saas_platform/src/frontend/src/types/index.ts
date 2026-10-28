@@ -128,6 +128,21 @@ export interface TourUploadHistoryReport {
   notes?: string[]
 }
 
+export type TourAnalyticsSource = 'main_tour' | 'tour_admin'
+
+export interface TourAnalyticsEntry {
+  id: string
+  tour_id: string
+  source: TourAnalyticsSource
+  tracking_key: string
+  publish_version: number
+  label: string | null
+  payload: Record<string, unknown>
+  recorded_at: string
+  created_at: string
+  updated_at: string
+}
+
 export interface TourUploadHistoryEntry {
   id: string
   tour_id: string

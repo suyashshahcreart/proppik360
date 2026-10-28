@@ -258,6 +258,45 @@ tours.get('/:id/history', authMiddleware, requirePermission('tour_view'), async 
   return c.json(ok({ tourId, history }))
 })
 
+// ── GET /api/tours/:id/analytics ──────────────────────────────
+tours.get(
+  '/:id/analytics',
+  authMiddleware,
+  requirePermission('tour_analytics_view'),
+  async (c) => {
+    const user = c.get('user')
+    const idParam = c.req.param('id')
+
+    const tour = await getTourByIdForOwner(c.env.DB, idParam, user.id)
+    if (!tour) {
+      return c.json(err('NOT_FOUND', 'Tour not found'), 404)
+    }
+
+    const { analyticsListQuerySchema } = await import('../utils/validation')
+    const { listAnalyticsHistory } = await import('../services/tour-analytics')
+
+    const parsed = analyticsListQuerySchema.safeParse({
+      source: c.req.query('source'),
+      tracking_key: c.req.query('tracking_key'),
+      publish_version: c.req.query('publish_version'),
+      limit: c.req.query('limit'),
+    })
+    if (!parsed.success) {
+      return c.json(err('INVALID_INPUT', parsed.error.errors[0].message), 422)
+    }
+
+    const publicId = tour.tour_id
+    const history = await listAnalyticsHistory(c.env.DB, publicId, {
+      source: parsed.data.source,
+      trackingKey: parsed.data.tracking_key,
+      publishVersion: parsed.data.publish_version,
+      limit: parsed.data.limit,
+    })
+
+    return c.json(ok({ tourId: publicId, history }))
+  },
+)
+
 // ── GET /api/tours/:id/tour-admin ─────────────────────────────
 // Returns { admins: TourAdmin[] }. Legacy clients: use admins[0].
 tours.get(

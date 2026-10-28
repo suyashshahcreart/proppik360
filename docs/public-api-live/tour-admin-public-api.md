@@ -234,6 +234,50 @@ Deletes up to **200** keys per call; if `truncated: true`, call again.
 
 ---
 
+## Analytics / tracking history
+
+Tour-admin site can **POST** JSON snapshots and **GET** history for **`source = tour_admin` only** (main-tour visitor data is not exposed on this API).
+
+### POST `/api/tour-admin/:tourId/analytics`
+
+Ingest auth (static sites cannot use SaaS cookies):
+
+- `X-Analytics-Ingest-Key: <TOUR_ANALYTICS_INGEST_SECRET>`  
+  **or** `Authorization: Bearer <same secret>`
+
+**Body:**
+
+```json
+{
+  "tracking_key": "session:abc",
+  "publish_version": 1,
+  "label": "Optional",
+  "recorded_at": "2026-10-28T12:00:00.000Z",
+  "payload": { "event": "page_view", "path": "/index.html" }
+}
+```
+
+Default `source` is `tour_admin`. Upsert key: `(tour_id, source, tracking_key, publish_version)`.
+
+**201** / **200** — `data`: `{ tourId, created, entry }`.
+
+---
+
+### GET `/api/tour-admin/:tourId/analytics`
+
+**Auth:** optional `X-Tour-Admin-Api-Key` (if configured) + **`Authorization: Bearer <tour-admin login token>`** (same session as folder 6 FS APIs).
+
+Session `tourId` must match the path → **403** if not.
+
+Query: `tracking_key`, `publish_version`, `limit` (max 200).  
+`source` query is ignored; results are always `tour_admin`.
+
+**200 `data`:** `{ tourId, history: [ ... ] }` — same entry shape as SaaS `GET /api/tours/:id/analytics`.
+
+Full ingest + SaaS GET details: `tour_saas_platform/docs/TOUR_ANALYTICS_API.md`.
+
+---
+
 ## Postman collection
 
 Import:

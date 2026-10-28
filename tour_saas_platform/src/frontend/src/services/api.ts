@@ -32,6 +32,8 @@ import type {
   TourAdminMasterTemplate,
   TourAdmin,
   TourAdminListResponse,
+  TourAnalyticsEntry,
+  TourAnalyticsSource,
 } from '../types'
 
 /** NDJSON progress events from DELETE /api/tours/:id */
@@ -197,6 +199,30 @@ export const api = {
     /** Per-ZIP upload / processing history (all attempts). */
     history: (id: string) =>
       request<{ tourId: string; history: TourUploadHistoryEntry[] }>(`/tours/${id}/history`),
+
+    analytics: {
+      list: (
+        id: string,
+        query?: {
+          source?: TourAnalyticsSource
+          tracking_key?: string
+          publish_version?: number
+          limit?: number
+        },
+      ) => {
+        const params = new URLSearchParams()
+        if (query?.source) params.set('source', query.source)
+        if (query?.tracking_key) params.set('tracking_key', query.tracking_key)
+        if (query?.publish_version != null) {
+          params.set('publish_version', String(query.publish_version))
+        }
+        if (query?.limit != null) params.set('limit', String(query.limit))
+        const qs = params.toString()
+        return request<{ tourId: string; history: TourAnalyticsEntry[] }>(
+          `/tours/${id}/analytics${qs ? `?${qs}` : ''}`,
+        )
+      },
+    },
 
     /** Probe Go processor liveness (Worker → PROCESSOR_WEBHOOK_URL /health). */
     processorStatus: () =>

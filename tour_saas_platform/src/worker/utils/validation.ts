@@ -444,6 +444,24 @@ export const tourAdminFsMkdirSchema = z.object({
 
 // ── CDN cache purge ───────────────────────────────────────────
 
+export const analyticsSourceSchema = z.enum(['main_tour', 'tour_admin'])
+
+export const analyticsIngestSchema = z.object({
+  tracking_key: z.string().min(1).max(128).trim(),
+  source: analyticsSourceSchema.optional(),
+  publish_version: z.number().int().min(1).optional(),
+  label: z.string().max(255).trim().optional().nullable(),
+  recorded_at: z.string().min(1).max(64).optional(),
+  payload: z.record(z.unknown()),
+})
+
+export const analyticsListQuerySchema = z.object({
+  source: analyticsSourceSchema.optional(),
+  tracking_key: z.string().max(128).optional(),
+  publish_version: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+})
+
 export const systemCachePurgeSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tours'),

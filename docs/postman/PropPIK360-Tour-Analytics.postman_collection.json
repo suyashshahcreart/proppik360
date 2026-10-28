@@ -1,0 +1,230 @@
+{
+  "info": {
+    "_postman_id": "proppik360-tour-analytics-v1",
+    "name": "PropPIK360 — Tour Analytics",
+    "description": "Tour analytics / tracking history — POST ingest (shared secret) and GET (SaaS cookie or tour-admin Bearer token).\n\n**Variables**\n- `apiBase` — API root without trailing slash (local: `http://127.0.0.1:8787`, live: `https://360.proppik.cloud`)\n- `tourId` — 6-digit public tour id\n- `analyticsIngestKey` — must match server `TOUR_ANALYTICS_INGEST_SECRET`\n- `tourAdminToken` — set after folder **3** login\n- `tourAdminApiKey` — optional when server has `TOUR_ADMIN_API_KEY`\n- `saasEmail` / `saasPassword` — folder **5** for SaaS GET\n\n**Docs:** `tour_saas_platform/docs/TOUR_ANALYTICS_API.md` · Postman pane: `TOUR_ANALYTICS_POSTMAN.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "apiBase", "value": "http://127.0.0.1:8787" },
+    { "key": "tourId", "value": "000002" },
+    { "key": "analyticsIngestKey", "value": "" },
+    { "key": "trackingKey", "value": "session:postman-test" },
+    { "key": "tourAdminToken", "value": "" },
+    { "key": "tourAdminApiKey", "value": "" },
+    { "key": "saasEmail", "value": "admin@example.com" },
+    { "key": "saasPassword", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. POST ingest — main tour (/api/public)",
+      "description": "Main tour viewer (`source=main_tour`). Auth: `X-Analytics-Ingest-Key` or Bearer ingest secret.",
+      "item": [
+        {
+          "name": "Upsert analytics snapshot (main_tour)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Analytics-Ingest-Key", "value": "{{analyticsIngestKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracking_key\": \"{{trackingKey}}\",\n  \"label\": \"Postman test\",\n  \"payload\": {\n    \"visitors\": 1,\n    \"note\": \"main_tour ingest\"\n  }\n}"
+            },
+            "url": "{{apiBase}}/api/public/tours/{{tourId}}/analytics",
+            "description": "Upserts on (tour_id, main_tour, tracking_key, publish_version). Omit publish_version to use latest upload attempt."
+          }
+        },
+        {
+          "name": "Upsert with explicit publish_version",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Analytics-Ingest-Key", "value": "{{analyticsIngestKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracking_key\": \"{{trackingKey}}\",\n  \"publish_version\": 1,\n  \"payload\": { \"attempt\": 1 }\n}"
+            },
+            "url": "{{apiBase}}/api/public/tours/{{tourId}}/analytics"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. POST ingest — tour admin (/api/tour-admin)",
+      "description": "Tour admin static site (`source=tour_admin`). Same ingest secret header.",
+      "item": [
+        {
+          "name": "Upsert analytics snapshot (tour_admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Analytics-Ingest-Key", "value": "{{analyticsIngestKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracking_key\": \"admin:{{trackingKey}}\",\n  \"label\": \"Postman tour_admin\",\n  \"payload\": {\n    \"event\": \"settings_view\",\n    \"path\": \"/index.html\"\n  }\n}"
+            },
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/analytics"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Helper — Tour admin login (for GET B)",
+      "description": "Optional `X-Tour-Admin-Api-Key` when env is set. Saves `tourAdminToken` for folder 4.",
+      "item": [
+        {
+          "name": "Login — password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.response.code === 200 && j.data && j.data.token) {",
+                  "  pm.collectionVariables.set('tourAdminToken', j.data.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin-{{tourId}}\",\n  \"password\": \"your-password-here\"\n}"
+            },
+            "url": "{{apiBase}}/api/tour-admin/{{tourId}}/login/password"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. GET — tour admin site (tour_admin rows only)",
+      "description": "Bearer `{{tourAdminToken}}`. Session tour must match `{{tourId}}`.",
+      "item": [
+        {
+          "name": "List analytics history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tourAdminToken}}"
+              },
+              {
+                "key": "X-Tour-Admin-Api-Key",
+                "value": "{{tourAdminApiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{apiBase}}/api/tour-admin/{{tourId}}/analytics?limit=50",
+              "host": ["{{apiBase}}"],
+              "path": ["api", "tour-admin", "{{tourId}}", "analytics"],
+              "query": [{ "key": "limit", "value": "50" }]
+            }
+          }
+        },
+        {
+          "name": "List — filter tracking_key",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{tourAdminToken}}" }
+            ],
+            "url": {
+              "raw": "{{apiBase}}/api/tour-admin/{{tourId}}/analytics?tracking_key=admin:{{trackingKey}}",
+              "host": ["{{apiBase}}"],
+              "path": ["api", "tour-admin", "{{tourId}}", "analytics"],
+              "query": [
+                { "key": "tracking_key", "value": "admin:{{trackingKey}}" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Helper — SaaS login (for GET A)",
+      "description": "Enable Postman **cookie jar** for `apiBase`. User needs `tour_analytics_view`.",
+      "item": [
+        {
+          "name": "POST /api/auth/login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{saasEmail}}\",\n  \"password\": \"{{saasPassword}}\"\n}"
+            },
+            "url": "{{apiBase}}/api/auth/login"
+          }
+        },
+        {
+          "name": "GET /api/auth/me",
+          "request": {
+            "method": "GET",
+            "url": "{{apiBase}}/api/auth/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. GET — Main 360 admin (all sources)",
+      "description": "SaaS session cookie. Optional `?source=main_tour|tour_admin`.",
+      "item": [
+        {
+          "name": "List analytics history (all sources)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{apiBase}}/api/tours/{{tourId}}/analytics?limit=50",
+              "host": ["{{apiBase}}"],
+              "path": ["api", "tours", "{{tourId}}", "analytics"],
+              "query": [{ "key": "limit", "value": "50" }]
+            }
+          }
+        },
+        {
+          "name": "List — source main_tour",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{apiBase}}/api/tours/{{tourId}}/analytics?source=main_tour",
+              "host": ["{{apiBase}}"],
+              "path": ["api", "tours", "{{tourId}}", "analytics"],
+              "query": [{ "key": "source", "value": "main_tour" }]
+            }
+          }
+        },
+        {
+          "name": "List — source tour_admin",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{apiBase}}/api/tours/{{tourId}}/analytics?source=tour_admin",
+              "host": ["{{apiBase}}"],
+              "path": ["api", "tours", "{{tourId}}", "analytics"],
+              "query": [{ "key": "source", "value": "tour_admin" }]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

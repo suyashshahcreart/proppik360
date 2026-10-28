@@ -91,6 +91,9 @@ export interface Env {
 
   /** Optional separate zone when R2_ADMIN_PUBLIC_DOMAIN is on another zone. */
   CLOUDFLARE_ADMIN_ZONE_ID?: string
+
+  /** Shared secret for POST analytics ingest from main tour / tour-admin static sites. */
+  TOUR_ANALYTICS_INGEST_SECRET?: string
 }
 
 /**

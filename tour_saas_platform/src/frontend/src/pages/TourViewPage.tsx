@@ -40,6 +40,8 @@ import type {
   PropertyCategoryTreeNode,
   SizeBhk,
   Tour,
+  TourAnalyticsEntry,
+  TourAnalyticsSource,
   TourUploadHistoryEntry,
   TourUploadHistoryStatus,
   User as AuthUser,
@@ -190,8 +192,14 @@ export function TourViewPage({ user }: { user: AuthUser }) {
   const [adminHistory, setAdminHistory] = useState<TourUploadHistoryEntry[]>([])
   const [adminPublishUrl, setAdminPublishUrl] = useState<string | null>(null)
   const [adminPublicDomain, setAdminPublicDomain] = useState<string | null>(null)
+  const [analytics, setAnalytics] = useState<TourAnalyticsEntry[]>([])
+  const [analyticsSourceFilter, setAnalyticsSourceFilter] = useState<'all' | TourAnalyticsSource>(
+    'all',
+  )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const canViewAnalytics = can(user, 'tour_analytics_view')
 
   useEffect(() => {
     if (!tourId) return
@@ -201,7 +209,8 @@ export function TourViewPage({ user }: { user: AuthUser }) {
 
     void (async () => {
       try {
-        const [tourData, options, historyData, adminHistoryData, adminInfo] = await Promise.all([
+        const [tourData, options, historyData, adminHistoryData, adminInfo, analyticsData] =
+          await Promise.all([
           api.tours.get(tourId),
           api.tours.formOptions(),
           api.tours.history(tourId).catch(() => ({ tourId, history: [] as TourUploadHistoryEntry[] })),
@@ -209,6 +218,9 @@ export function TourViewPage({ user }: { user: AuthUser }) {
             .history(tourId)
             .catch(() => ({ tourId, artifactType: 'tour_admin', history: [] as TourUploadHistoryEntry[] })),
           api.artifacts.tourAdmin.publishInfo(tourId).catch(() => null),
+          canViewAnalytics
+            ? api.tours.analytics.list(tourId).catch(() => ({ tourId, history: [] as TourAnalyticsEntry[] }))
+            : Promise.resolve({ tourId, history: [] as TourAnalyticsEntry[] }),
         ])
         if (cancelled) return
         setTour(tourData)
@@ -218,6 +230,7 @@ export function TourViewPage({ user }: { user: AuthUser }) {
         setAdminHistory(adminHistoryData.history)
         setAdminPublishUrl(adminInfo?.publishUrl ?? null)
         setAdminPublicDomain(adminInfo?.publicDomain ?? null)
+        setAnalytics(analyticsData.history)
 
         try {
           const mediaRes = await api.media.list({
@@ -239,7 +252,12 @@ export function TourViewPage({ user }: { user: AuthUser }) {
     return () => {
       cancelled = true
     }
-  }, [tourId])
+  }, [tourId, canViewAnalytics])
+
+  const filteredAnalytics = useMemo(() => {
+    if (analyticsSourceFilter === 'all') return analytics
+    return analytics.filter((row) => row.source === analyticsSourceFilter)
+  }, [analytics, analyticsSourceFilter])
 
   const customer = useMemo(() => {
     if (!tour?.customer_id) return null
@@ -839,6 +857,51 @@ export function TourViewPage({ user }: { user: AuthUser }) {
             )}
           </ListBox>
 
+          {canViewAnalytics && (
+            <ListBox
+              title="Analytics / tracking"
+              subtitle={
+                loading
+                  ? 'Loading…'
+                  : filteredAnalytics.length === 0
+                    ? 'No analytics snapshots yet'
+                    : `${filteredAnalytics.length} snapshot${filteredAnalytics.length === 1 ? '' : 's'}`
+              }
+              headerActions={
+                <div className="flex flex-wrap gap-1">
+                  {(['all', 'main_tour', 'tour_admin'] as const).map((key) => (
+                    <Button
+                      key={key}
+                      type="button"
+                      size="sm"
+                      variant={analyticsSourceFilter === key ? 'default' : 'outline'}
+                      className="h-7 text-xs"
+                      onClick={() => setAnalyticsSourceFilter(key)}
+                    >
+                      {key === 'all' ? 'All' : key === 'main_tour' ? 'Main tour' : 'Tour admin'}
+                    </Button>
+                  ))}
+                </div>
+              }
+            >
+              {loading ? (
+                <DetailSkeleton rows={3} />
+              ) : filteredAnalytics.length === 0 ? (
+                <EmptyState
+                  icon={Clock}
+                  title="No analytics history"
+                  description="Main tour and tour-admin sites POST JSON snapshots to the analytics ingest API."
+                />
+              ) : (
+                <div className="flex flex-col gap-3 p-4">
+                  {filteredAnalytics.map((entry, index) => (
+                    <AnalyticsHistoryCard key={entry.id} entry={entry} defaultOpen={index === 0} />
+                  ))}
+                </div>
+              )}
+            </ListBox>
+          )}
+
           <ListBox
             title="Admin package uploads"
             subtitle={
@@ -1041,6 +1104,67 @@ function UploadHistoryCard({
           ) : (
             <p className="text-xs text-muted-foreground">No stage events recorded.</p>
           )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+function AnalyticsHistoryCard({
+  entry,
+  defaultOpen,
+}: {
+  entry: TourAnalyticsEntry
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen ?? false)
+  const payloadText = useMemo(() => JSON.stringify(entry.payload, null, 2), [entry.payload])
+  const sourceLabel = entry.source === 'main_tour' ? 'Main tour' : 'Tour admin'
+
+  async function copyPayload() {
+    try {
+      await navigator.clipboard.writeText(payloadText)
+      toast.success('JSON copied')
+    } catch {
+      toast.error('Could not copy JSON')
+    }
+  }
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="rounded-lg border border-border bg-card">
+      <CollapsibleTrigger className="flex w-full items-start gap-3 px-3 py-3 text-left">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-foreground">
+              Attempt #{entry.publish_version}
+            </span>
+            <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {sourceLabel}
+            </span>
+            {entry.label ? (
+              <span className="truncate text-xs text-muted-foreground">{entry.label}</span>
+            ) : null}
+          </div>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">{entry.tracking_key}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Recorded {formatDateTime(entry.recorded_at)}
+            {' · '}
+            Updated {formatDateTime(entry.updated_at)}
+          </p>
+        </div>
+        <ChevronDown className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform [[data-state=open]_&]:rotate-180" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="space-y-2 border-t border-border px-3 py-3">
+          <div className="flex justify-end">
+            <Button type="button" size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={copyPayload}>
+              <Copy className="size-3" />
+              Copy JSON
+            </Button>
+          </div>
+          <pre className="max-h-96 overflow-auto rounded-md bg-muted/50 p-3 text-[11px] leading-relaxed text-foreground">
+            {payloadText}
+          </pre>
         </div>
       </CollapsibleContent>
     </Collapsible>
