@@ -156,7 +156,9 @@ export const api = {
     get: (id: string) => request<Tour>(`/tours/${id}`),
 
     purgeCachePreview: (id: string) =>
-      request<{ tourId: string; prefixes: string[] }>(`/tours/${id}/cache/purge/preview`),
+      request<{ tourId: string; prefixes: string[]; adminPurgeSkipped?: boolean }>(
+        `/tours/${id}/cache/purge/preview`,
+      ),
 
     purgeCache: (id: string) =>
       request<{

@@ -64,10 +64,7 @@ export function buildTourPurgePrefixUrls(tourId: string): string[] {
   const pid = tourId.trim()
   if (!pid) return []
   const main = getR2PublicDomain()
-  const prefixes = [
-    `https://${main}/${pid}/`,
-    `https://${main}/tours/${pid}/`,
-  ]
+  const prefixes = [`https://${main}/${pid}/`]
   const adminPrefix = buildAdminPurgePrefixUrl(pid)
   if (adminPrefix) prefixes.push(adminPrefix)
   return [...new Set(prefixes)]

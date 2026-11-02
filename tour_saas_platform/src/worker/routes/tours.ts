@@ -434,9 +434,14 @@ tours.get(
       return c.json(err('NOT_FOUND', 'Tour not found'), 404)
     }
     const publicId = tour.tour_id ?? tourId
-    const { buildTourPurgePrefixes } = await import('../services/cloudflare-cache')
+    const { buildTourPurgePrefixes, canPurgeVpsAdminCdn } = await import(
+      '../services/cloudflare-cache'
+    )
     const prefixes = buildTourPurgePrefixes(publicId, c.env)
-    return c.json(ok({ tourId: publicId, prefixes }))
+    const adminPurgeSkipped =
+      !canPurgeVpsAdminCdn(c.env) &&
+      Boolean(c.env.TOUR_ADMIN_PUBLISH_ROOT?.trim() && c.env.TOUR_ADMIN_PUBLIC_HOST?.trim())
+    return c.json(ok({ tourId: publicId, prefixes, adminPurgeSkipped }))
   },
 )
 

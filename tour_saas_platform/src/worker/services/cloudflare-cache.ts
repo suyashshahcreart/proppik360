@@ -6,7 +6,7 @@ import {
   adminWebPublishPrefix,
   isTourAdminVpsPublishConfigured,
 } from './admin-paths'
-import { legacyTourDeletePrefix, tourR2Prefix } from '../utils/tour-storage'
+import { tourR2Prefix } from '../utils/tour-storage'
 import { listObjectsPage, type R2Config } from './r2'
 
 export const PURGE_ALL_CONFIRM_PHRASE = 'PURGE ALL CACHE'
@@ -79,11 +79,22 @@ function resolveZoneIdForHost(env: Env, host: string): string | undefined {
       : ''
 
   const defaultZone = env.CLOUDFLARE_ZONE_ID?.trim()
-  const adminZone = env.CLOUDFLARE_ADMIN_ZONE_ID?.trim() || defaultZone
+  const adminZoneDedicated = env.CLOUDFLARE_ADMIN_ZONE_ID?.trim()
 
   if (mainHost && host === mainHost) return defaultZone
-  if (adminHost && host === adminHost) return adminZone
+  if (adminHost && host === adminHost) {
+    if (isTourAdminVpsPublishConfigured(env)) {
+      return adminZoneDedicated
+    }
+    return adminZoneDedicated || defaultZone
+  }
   return defaultZone
+}
+
+/** VPS admin CDN purge only when a dedicated Cloudflare zone id is configured. */
+export function canPurgeVpsAdminCdn(env: Env): boolean {
+  if (!isTourAdminVpsPublishConfigured(env)) return false
+  return Boolean(env.CLOUDFLARE_ADMIN_ZONE_ID?.trim())
 }
 
 function groupPrefixesByZone(
@@ -160,7 +171,7 @@ function prefixUrl(host: string, pathWithoutLeadingSlash: string): string {
   return `https://${hostNorm}/${path}/`
 }
 
-/** Public CDN prefixes cleared for one tour (main + legacy + optional admin). */
+/** Public CDN prefixes cleared for one tour (flat viewer path + optional admin). */
 export function buildTourPurgePrefixes(tourId: string, env: Env): string[] {
   const pid = tourId.trim()
   if (!pid) return []
@@ -169,16 +180,17 @@ export function buildTourPurgePrefixes(tourId: string, env: Env): string[] {
   const prefixes: string[] = []
   if (mainHost) {
     prefixes.push(prefixUrl(mainHost, tourR2Prefix(pid)))
-    prefixes.push(prefixUrl(mainHost, legacyTourDeletePrefix(pid)))
   }
 
   if (isTourAdminVpsPublishConfigured(env)) {
-    const adminHost = env.TOUR_ADMIN_PUBLIC_HOST!.trim()
-    const webPath = adminWebPublishPrefix(pid, env.TOUR_ADMIN_PUBLIC_PATH_PREFIX).replace(
-      /\/$/,
-      '',
-    )
-    prefixes.push(prefixUrl(adminHost, webPath))
+    if (canPurgeVpsAdminCdn(env)) {
+      const adminHost = env.TOUR_ADMIN_PUBLIC_HOST!.trim()
+      const webPath = adminWebPublishPrefix(pid, env.TOUR_ADMIN_PUBLIC_PATH_PREFIX).replace(
+        /\/$/,
+        '',
+      )
+      prefixes.push(prefixUrl(adminHost, webPath))
+    }
   } else {
     const adminHost = env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
     if (adminHost) {

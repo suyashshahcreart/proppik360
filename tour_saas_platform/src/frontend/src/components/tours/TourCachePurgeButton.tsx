@@ -33,6 +33,7 @@ export function TourCachePurgeButton({
   const [loading, setLoading] = useState(false)
   const [prefixes, setPrefixes] = useState<string[]>(() => buildTourPurgePrefixUrls(tourId))
   const [loadingPrefixes, setLoadingPrefixes] = useState(false)
+  const [adminPurgeSkipped, setAdminPurgeSkipped] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -41,7 +42,9 @@ export function TourCachePurgeButton({
     void api.tours
       .purgeCachePreview(tourId)
       .then((res) => {
-        if (!cancelled && res.prefixes.length > 0) setPrefixes(res.prefixes)
+        if (cancelled) return
+        if (res.prefixes.length > 0) setPrefixes(res.prefixes)
+        setAdminPurgeSkipped(Boolean(res.adminPurgeSkipped))
       })
       .catch(() => {
         if (!cancelled) setPrefixes(buildTourPurgePrefixUrls(tourId))
@@ -118,6 +121,12 @@ export function TourCachePurgeButton({
               ))}
             </ul>
           )}
+          {adminPurgeSkipped ? (
+            <p className="text-xs text-muted-foreground">
+              Tour-admin CDN purge skipped (set CLOUDFLARE_ADMIN_ZONE_ID on the server to include{' '}
+              tour.proppik.cloud).
+            </p>
+          ) : null}
         </div>
       </ConfirmDialog>
     </>
