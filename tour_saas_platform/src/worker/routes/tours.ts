@@ -421,6 +421,25 @@ tours.post(
   },
 )
 
+// ── GET /api/tours/:id/cache/purge/preview ────────────────────
+tours.get(
+  '/:id/cache/purge/preview',
+  authMiddleware,
+  requirePermission('cache_purge_tour'),
+  async (c) => {
+    const user = c.get('user')
+    const tourId = c.req.param('id')
+    const tour = await getTourByIdForOwner(c.env.DB, tourId, user.id)
+    if (!tour) {
+      return c.json(err('NOT_FOUND', 'Tour not found'), 404)
+    }
+    const publicId = tour.tour_id ?? tourId
+    const { buildTourPurgePrefixes } = await import('../services/cloudflare-cache')
+    const prefixes = buildTourPurgePrefixes(publicId, c.env)
+    return c.json(ok({ tourId: publicId, prefixes }))
+  },
+)
+
 // ── POST /api/tours/:id/cache/purge ───────────────────────────
 tours.post(
   '/:id/cache/purge',
@@ -466,6 +485,7 @@ tours.post(
           mode: result.mode,
           purgedPrefixes: result.prefixes,
           fileCount: result.fileCount,
+          warnings: result.warnings,
         }),
       )
     } catch (e) {

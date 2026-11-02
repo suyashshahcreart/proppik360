@@ -30,7 +30,12 @@ export interface TourPurgeResult {
   prefixes: string[]
   fileCount?: number
   cloudflare: CloudflarePurgeApiResult
+  /** Non-fatal issues (e.g. admin zone purge failed while main succeeded). */
+  warnings?: string[]
 }
+
+/** Cap file-by-file fallback — listing/purging above this is too slow for one HTTP request. */
+export const MAX_R2_FILE_PURGE = 500
 
 export class CachePurgeNotConfiguredError extends Error {
   constructor() {
@@ -81,39 +86,72 @@ function resolveZoneIdForHost(env: Env, host: string): string | undefined {
   return defaultZone
 }
 
-async function purgePrefixesAcrossZones(
+function groupPrefixesByZone(
   env: Env,
   prefixes: string[],
-): Promise<CloudflarePurgeApiResult> {
-  const { token } = assertCloudflarePurgeConfigured(env)
+): { ok: true; byZone: Map<string, string[]> } | { ok: false; message: string } {
   const byZone = new Map<string, string[]>()
-
   for (const p of prefixes) {
     const host = hostFromUrl(p)
     if (!host) {
-      return {
-        success: false,
-        errors: [{ code: 0, message: `Invalid purge prefix URL: ${p}` }],
-      }
+      return { ok: false, message: `Invalid purge prefix URL: ${p}` }
     }
     const zoneId = resolveZoneIdForHost(env, host)
     if (!zoneId) {
-      return {
-        success: false,
-        errors: [{ code: 0, message: `No Cloudflare zone for host ${host}` }],
-      }
+      return { ok: false, message: `No Cloudflare zone for host ${host}` }
     }
     const list = byZone.get(zoneId) ?? []
     list.push(p)
     byZone.set(zoneId, list)
   }
+  return { ok: true, byZone }
+}
 
+async function purgePrefixesAcrossZones(
+  env: Env,
+  prefixes: string[],
+): Promise<CloudflarePurgeApiResult> {
+  const grouped = groupPrefixesByZone(env, prefixes)
+  if (!grouped.ok) {
+    return { success: false, errors: [{ code: 0, message: grouped.message }] }
+  }
+  const { token } = assertCloudflarePurgeConfigured(env)
   let last: CloudflarePurgeApiResult = { success: true }
-  for (const [zoneId, zonePrefixes] of byZone) {
+  for (const [zoneId, zonePrefixes] of grouped.byZone) {
     last = await callCloudflarePurge(zoneId, token, { prefixes: zonePrefixes })
     if (!last.success) return last
   }
   return last
+}
+
+function adminPurgeHost(env: Env): string {
+  if (isTourAdminVpsPublishConfigured(env)) {
+    const h = env.TOUR_ADMIN_PUBLIC_HOST?.trim()
+    return h ? normalizeHost(h) : ''
+  }
+  const legacy = env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
+  return legacy ? normalizeHost(legacy) : ''
+}
+
+function splitMainAndAdminPrefixes(env: Env, prefixes: string[]): {
+  main: string[]
+  admin: string[]
+} {
+  const mainHost = env.R2_PUBLIC_DOMAIN?.trim() ? normalizeHost(env.R2_PUBLIC_DOMAIN) : ''
+  const adminHost = adminPurgeHost(env)
+  const main: string[] = []
+  const admin: string[] = []
+  for (const p of prefixes) {
+    const h = hostFromUrl(p)
+    if (adminHost && h === adminHost) admin.push(p)
+    else if (mainHost && h === mainHost) main.push(p)
+    else main.push(p)
+  }
+  return { main, admin }
+}
+
+function cloudflareErrorMessage(cf: CloudflarePurgeApiResult): string {
+  return cf.errors?.[0]?.message ?? 'Cloudflare cache purge failed'
 }
 
 function prefixUrl(host: string, pathWithoutLeadingSlash: string): string {
@@ -293,42 +331,63 @@ export function validateCustomPurgeValues(
   }
 }
 
-/** Purge one tour: prefix API first, R2 file list fallback on failure. */
+/** Purge one tour: prefix API per zone; R2 file fallback only when main viewer prefixes fail. */
 export async function purgeTourCache(env: Env, tourId: string): Promise<TourPurgeResult> {
   const prefixes = buildTourPurgePrefixes(tourId, env)
   if (prefixes.length === 0) {
     throw new Error('No purge prefixes could be built (check R2_PUBLIC_DOMAIN)')
   }
 
-  let cf = await purgePrefixesAcrossZones(env, prefixes)
-  if (cf.success) {
-    return { tourId, mode: 'prefix', prefixes, cloudflare: cf }
+  const warnings: string[] = []
+  const { main: mainPrefixes, admin: adminPrefixes } = splitMainAndAdminPrefixes(env, prefixes)
+
+  const mainCf =
+    mainPrefixes.length > 0
+      ? await purgePrefixesAcrossZones(env, mainPrefixes)
+      : ({ success: true } as CloudflarePurgeApiResult)
+
+  let adminCf: CloudflarePurgeApiResult | null = null
+  if (adminPrefixes.length > 0) {
+    adminCf = await purgePrefixesAcrossZones(env, adminPrefixes)
+    if (!adminCf.success) {
+      const hint = env.CLOUDFLARE_ADMIN_ZONE_ID?.trim()
+        ? ''
+        : ' Set CLOUDFLARE_ADMIN_ZONE_ID if tour.proppik.cloud uses a separate Cloudflare zone.'
+      warnings.push(`Admin CDN purge failed: ${cloudflareErrorMessage(adminCf)}.${hint}`)
+    }
+  }
+
+  if (mainCf.success) {
+    return {
+      tourId,
+      mode: 'prefix',
+      prefixes,
+      cloudflare: mainCf,
+      warnings: warnings.length ? warnings : undefined,
+    }
   }
 
   const { token, zoneId } = assertCloudflarePurgeConfigured(env)
   const mainHost = normalizeHost(env.R2_PUBLIC_DOMAIN)
   const config = r2ConfigFromEnv(env)
   const keys = await listAllObjectKeys(config, tourR2Prefix(tourId.trim()))
+
+  if (keys.length > MAX_R2_FILE_PURGE) {
+    throw new Error(
+      `Prefix purge failed and tour has ${keys.length} R2 files (limit ${MAX_R2_FILE_PURGE} for file purge). ` +
+        `Check CLOUDFLARE_ZONE_ID and prefix URLs. ${cloudflareErrorMessage(mainCf)}`,
+    )
+  }
+
   const files = keys.map((key) => `https://${mainHost}/${key.replace(/^\/+/, '')}`)
 
   if (files.length === 0) {
-    return { tourId, mode: 'prefix', prefixes, cloudflare: cf }
+    return { tourId, mode: 'prefix', prefixes, cloudflare: mainCf, warnings }
   }
 
   const { last } = await purgeFilesBatched(zoneId, token, files)
-  cf = last
-  if (cf.success && isTourAdminVpsPublishConfigured(env)) {
-    const adminPrefixes = prefixes.filter((p) => {
-      const h = hostFromUrl(p)
-      const adminH = env.TOUR_ADMIN_PUBLIC_HOST?.trim()
-        ? normalizeHost(env.TOUR_ADMIN_PUBLIC_HOST)
-        : ''
-      return h === adminH
-    })
-    if (adminPrefixes.length > 0) {
-      const adminCf = await purgePrefixesAcrossZones(env, adminPrefixes)
-      if (!adminCf.success) cf = adminCf
-    }
+  if (last.success && adminCf && !adminCf.success) {
+    warnings.push(`Admin CDN purge failed: ${cloudflareErrorMessage(adminCf)}`)
   }
 
   return {
@@ -336,7 +395,8 @@ export async function purgeTourCache(env: Env, tourId: string): Promise<TourPurg
     mode: 'files',
     prefixes,
     fileCount: files.length,
-    cloudflare: cf,
+    cloudflare: last,
+    warnings: warnings.length ? warnings : undefined,
   }
 }
 

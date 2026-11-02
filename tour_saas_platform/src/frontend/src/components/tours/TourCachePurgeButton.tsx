@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/services/api'
@@ -31,16 +31,41 @@ export function TourCachePurgeButton({
 }: TourCachePurgeButtonProps) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [prefixes, setPrefixes] = useState<string[]>(() => buildTourPurgePrefixUrls(tourId))
+  const [loadingPrefixes, setLoadingPrefixes] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setLoadingPrefixes(true)
+    void api.tours
+      .purgeCachePreview(tourId)
+      .then((res) => {
+        if (!cancelled && res.prefixes.length > 0) setPrefixes(res.prefixes)
+      })
+      .catch(() => {
+        if (!cancelled) setPrefixes(buildTourPurgePrefixUrls(tourId))
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPrefixes(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, tourId])
 
   if (!can(user, 'cache_purge_tour')) return null
   if (!showWhenNotLive && !isLive) return null
-
-  const prefixes = buildTourPurgePrefixUrls(tourId)
 
   async function handleConfirm() {
     setLoading(true)
     try {
       const result = await api.tours.purgeCache(tourId)
+      if (result.warnings?.length) {
+        for (const w of result.warnings) {
+          toast.warning(w)
+        }
+      }
       toast.success(
         result.mode === 'files' && result.fileCount
           ? `CDN cache cleared (${result.fileCount} files)`
@@ -78,15 +103,21 @@ export function TourCachePurgeButton({
         onConfirm={() => void handleConfirm()}
       >
         <div className="space-y-2 text-sm">
-          <p className="text-muted-foreground">Tour ID: <span className="font-mono text-foreground">{tourId}</span></p>
-          <p className="font-medium text-foreground">Prefixes:</p>
-          <ul className="max-h-32 overflow-y-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] leading-relaxed">
-            {prefixes.map((p) => (
-              <li key={p} className="break-all">
-                {p}
-              </li>
-            ))}
-          </ul>
+          <p className="text-muted-foreground">
+            Tour ID: <span className="font-mono text-foreground">{tourId}</span>
+          </p>
+          <p className="font-medium text-foreground">Prefixes (from server):</p>
+          {loadingPrefixes ? (
+            <p className="text-xs text-muted-foreground">Loading purge targets…</p>
+          ) : (
+            <ul className="max-h-32 overflow-y-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] leading-relaxed">
+              {prefixes.map((p) => (
+                <li key={p} className="break-all">
+                  {p}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </ConfirmDialog>
     </>
