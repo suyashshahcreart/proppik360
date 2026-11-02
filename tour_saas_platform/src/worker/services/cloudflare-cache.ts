@@ -2,7 +2,10 @@
 // Cloudflare zone cache purge (tour prefixes + custom / bulk)
 // ============================================================
 import type { Env } from '../types'
-import { isTourAdminVpsPublishConfigured } from './admin-paths'
+import {
+  adminWebPublishPrefix,
+  isTourAdminVpsPublishConfigured,
+} from './admin-paths'
 import { legacyTourDeletePrefix, tourR2Prefix } from '../utils/tour-storage'
 import { listObjectsPage, type R2Config } from './r2'
 
@@ -48,9 +51,69 @@ export function getAllowedPurgeHosts(env: Env): Set<string> {
   const hosts = new Set<string>()
   const main = env.R2_PUBLIC_DOMAIN?.trim()
   if (main) hosts.add(normalizeHost(main))
-  const admin = env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
-  if (admin) hosts.add(normalizeHost(admin))
+  if (isTourAdminVpsPublishConfigured(env)) {
+    const vpsHost = env.TOUR_ADMIN_PUBLIC_HOST?.trim()
+    if (vpsHost) hosts.add(normalizeHost(vpsHost))
+  } else {
+    const admin = env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
+    if (admin) hosts.add(normalizeHost(admin))
+  }
   return hosts
+}
+
+function resolveZoneIdForHost(env: Env, host: string): string | undefined {
+  const mainHost = env.R2_PUBLIC_DOMAIN?.trim()
+    ? normalizeHost(env.R2_PUBLIC_DOMAIN)
+    : ''
+  const adminHost = isTourAdminVpsPublishConfigured(env)
+    ? env.TOUR_ADMIN_PUBLIC_HOST?.trim()
+      ? normalizeHost(env.TOUR_ADMIN_PUBLIC_HOST)
+      : ''
+    : env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
+      ? normalizeHost(env.R2_ADMIN_PUBLIC_DOMAIN)
+      : ''
+
+  const defaultZone = env.CLOUDFLARE_ZONE_ID?.trim()
+  const adminZone = env.CLOUDFLARE_ADMIN_ZONE_ID?.trim() || defaultZone
+
+  if (mainHost && host === mainHost) return defaultZone
+  if (adminHost && host === adminHost) return adminZone
+  return defaultZone
+}
+
+async function purgePrefixesAcrossZones(
+  env: Env,
+  prefixes: string[],
+): Promise<CloudflarePurgeApiResult> {
+  const { token } = assertCloudflarePurgeConfigured(env)
+  const byZone = new Map<string, string[]>()
+
+  for (const p of prefixes) {
+    const host = hostFromUrl(p)
+    if (!host) {
+      return {
+        success: false,
+        errors: [{ code: 0, message: `Invalid purge prefix URL: ${p}` }],
+      }
+    }
+    const zoneId = resolveZoneIdForHost(env, host)
+    if (!zoneId) {
+      return {
+        success: false,
+        errors: [{ code: 0, message: `No Cloudflare zone for host ${host}` }],
+      }
+    }
+    const list = byZone.get(zoneId) ?? []
+    list.push(p)
+    byZone.set(zoneId, list)
+  }
+
+  let last: CloudflarePurgeApiResult = { success: true }
+  for (const [zoneId, zonePrefixes] of byZone) {
+    last = await callCloudflarePurge(zoneId, token, { prefixes: zonePrefixes })
+    if (!last.success) return last
+  }
+  return last
 }
 
 function prefixUrl(host: string, pathWithoutLeadingSlash: string): string {
@@ -71,7 +134,14 @@ export function buildTourPurgePrefixes(tourId: string, env: Env): string[] {
     prefixes.push(prefixUrl(mainHost, legacyTourDeletePrefix(pid)))
   }
 
-  if (!isTourAdminVpsPublishConfigured(env)) {
+  if (isTourAdminVpsPublishConfigured(env)) {
+    const adminHost = env.TOUR_ADMIN_PUBLIC_HOST!.trim()
+    const webPath = adminWebPublishPrefix(pid, env.TOUR_ADMIN_PUBLIC_PATH_PREFIX).replace(
+      /\/$/,
+      '',
+    )
+    prefixes.push(prefixUrl(adminHost, webPath))
+  } else {
     const adminHost = env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
     if (adminHost) {
       prefixes.push(prefixUrl(adminHost, tourR2Prefix(pid)))
@@ -225,17 +295,17 @@ export function validateCustomPurgeValues(
 
 /** Purge one tour: prefix API first, R2 file list fallback on failure. */
 export async function purgeTourCache(env: Env, tourId: string): Promise<TourPurgeResult> {
-  const { token, zoneId } = assertCloudflarePurgeConfigured(env)
   const prefixes = buildTourPurgePrefixes(tourId, env)
   if (prefixes.length === 0) {
     throw new Error('No purge prefixes could be built (check R2_PUBLIC_DOMAIN)')
   }
 
-  let cf = await callCloudflarePurge(zoneId, token, { prefixes })
+  let cf = await purgePrefixesAcrossZones(env, prefixes)
   if (cf.success) {
     return { tourId, mode: 'prefix', prefixes, cloudflare: cf }
   }
 
+  const { token, zoneId } = assertCloudflarePurgeConfigured(env)
   const mainHost = normalizeHost(env.R2_PUBLIC_DOMAIN)
   const config = r2ConfigFromEnv(env)
   const keys = await listAllObjectKeys(config, tourR2Prefix(tourId.trim()))
@@ -246,12 +316,27 @@ export async function purgeTourCache(env: Env, tourId: string): Promise<TourPurg
   }
 
   const { last } = await purgeFilesBatched(zoneId, token, files)
+  cf = last
+  if (cf.success && isTourAdminVpsPublishConfigured(env)) {
+    const adminPrefixes = prefixes.filter((p) => {
+      const h = hostFromUrl(p)
+      const adminH = env.TOUR_ADMIN_PUBLIC_HOST?.trim()
+        ? normalizeHost(env.TOUR_ADMIN_PUBLIC_HOST)
+        : ''
+      return h === adminH
+    })
+    if (adminPrefixes.length > 0) {
+      const adminCf = await purgePrefixesAcrossZones(env, adminPrefixes)
+      if (!adminCf.success) cf = adminCf
+    }
+  }
+
   return {
     tourId,
     mode: 'files',
     prefixes,
     fileCount: files.length,
-    cloudflare: last,
+    cloudflare: cf,
   }
 }
 

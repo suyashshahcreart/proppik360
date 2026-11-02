@@ -48,6 +48,17 @@ function usesVpsAdminPreview(): boolean {
   )
 }
 
+function buildAdminPurgePrefixUrl(tourId: string): string | null {
+  const host = getAdminPublicHost()
+  if (!host) return null
+  if (usesVpsAdminPreview()) {
+    const prefix = getAdminPathPrefix() ?? DEFAULT_ADMIN_PUBLIC_PATH_PREFIX
+    const path = `${prefix}/${tourId}/`.replace(/\/+/g, '/')
+    return `https://${host}${path}`
+  }
+  return `https://${host}/${tourId}/`
+}
+
 /** CDN prefix URLs cleared for one tour (mirrors server buildTourPurgePrefixes). */
 export function buildTourPurgePrefixUrls(tourId: string): string[] {
   const pid = tourId.trim()
@@ -57,10 +68,8 @@ export function buildTourPurgePrefixUrls(tourId: string): string[] {
     `https://${main}/${pid}/`,
     `https://${main}/tours/${pid}/`,
   ]
-  if (!usesVpsAdminPreview()) {
-    const admin = getAdminPublicHost()
-    if (admin) prefixes.push(`https://${admin}/${pid}/`)
-  }
+  const adminPrefix = buildAdminPurgePrefixUrl(pid)
+  if (adminPrefix) prefixes.push(adminPrefix)
   return [...new Set(prefixes)]
 }
 
