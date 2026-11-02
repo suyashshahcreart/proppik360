@@ -103,9 +103,9 @@ function groupPrefixesByZone(
 ): { ok: true; byZone: Map<string, string[]> } | { ok: false; message: string } {
   const byZone = new Map<string, string[]>()
   for (const p of prefixes) {
-    const host = hostFromUrl(p)
+    const host = hostFromPurgePrefix(p)
     if (!host) {
-      return { ok: false, message: `Invalid purge prefix URL: ${p}` }
+      return { ok: false, message: `Invalid purge prefix: ${p}` }
     }
     const zoneId = resolveZoneIdForHost(env, host)
     if (!zoneId) {
@@ -153,7 +153,7 @@ function splitMainAndAdminPrefixes(env: Env, prefixes: string[]): {
   const main: string[] = []
   const admin: string[] = []
   for (const p of prefixes) {
-    const h = hostFromUrl(p)
+    const h = hostFromPurgePrefix(p)
     if (adminHost && h === adminHost) admin.push(p)
     else if (mainHost && h === mainHost) main.push(p)
     else main.push(p)
@@ -165,10 +165,40 @@ function cloudflareErrorMessage(cf: CloudflarePurgeApiResult): string {
   return cf.errors?.[0]?.message ?? 'Cloudflare cache purge failed'
 }
 
-function prefixUrl(host: string, pathWithoutLeadingSlash: string): string {
+/** Cloudflare purge_cache `prefixes` value: `host/path/` — no `https://` (API requirement). */
+export function buildCloudflarePurgePrefix(
+  host: string,
+  pathWithoutLeadingSlash: string,
+): string {
   const hostNorm = normalizeHost(host)
   const path = pathWithoutLeadingSlash.replace(/^\/+/, '').replace(/\/+$/, '')
-  return `https://${hostNorm}/${path}/`
+  if (!path) return `${hostNorm}/`
+  return `${hostNorm}/${path}/`
+}
+
+/** Human-readable URL for UI / docs (https with trailing slash). */
+export function purgePrefixForDisplay(apiPrefix: string): string {
+  const p = apiPrefix.trim()
+  if (/^https?:\/\//i.test(p)) {
+    return p.endsWith('/') ? p : `${p}/`
+  }
+  const body = p.replace(/^\/+/, '')
+  return `https://${body.endsWith('/') ? body : `${body}/`}`
+}
+
+function httpsPrefixToCloudflareApiPrefix(url: string): string {
+  let p = url.trim()
+  if (!p.endsWith('/')) p += '/'
+  return p.replace(/^https?:\/\//i, '')
+}
+
+function hostFromPurgePrefix(prefix: string): string | null {
+  const p = prefix.trim()
+  if (/^https?:\/\//i.test(p)) return hostFromUrl(p)
+  const body = p.replace(/^\/+/, '')
+  const slash = body.indexOf('/')
+  const host = slash === -1 ? body : body.slice(0, slash)
+  return host ? normalizeHost(host) : null
 }
 
 /** Public CDN prefixes cleared for one tour (flat viewer path + optional admin). */
@@ -179,7 +209,7 @@ export function buildTourPurgePrefixes(tourId: string, env: Env): string[] {
   const mainHost = env.R2_PUBLIC_DOMAIN?.trim()
   const prefixes: string[] = []
   if (mainHost) {
-    prefixes.push(prefixUrl(mainHost, tourR2Prefix(pid)))
+    prefixes.push(buildCloudflarePurgePrefix(mainHost, tourR2Prefix(pid)))
   }
 
   if (isTourAdminVpsPublishConfigured(env)) {
@@ -189,12 +219,12 @@ export function buildTourPurgePrefixes(tourId: string, env: Env): string[] {
         /\/$/,
         '',
       )
-      prefixes.push(prefixUrl(adminHost, webPath))
+      prefixes.push(buildCloudflarePurgePrefix(adminHost, webPath))
     }
   } else {
     const adminHost = env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
     if (adminHost) {
-      prefixes.push(prefixUrl(adminHost, tourR2Prefix(pid)))
+      prefixes.push(buildCloudflarePurgePrefix(adminHost, tourR2Prefix(pid)))
     }
   }
 
@@ -334,7 +364,7 @@ export function validateCustomPurgeValues(
         if (!host || !allowedHosts.has(host)) {
           return { ok: false, message: `Prefix host not allowed: ${raw}` }
         }
-        prefixes.push(p)
+        prefixes.push(httpsPrefixToCloudflareApiPrefix(p))
       }
       return { ok: true, payload: { prefixes } }
     }
