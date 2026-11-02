@@ -115,8 +115,11 @@ Separate from viewer upload. See [PLAN-phase-b-admin-artifact-upload.md](./PLAN-
 
 | Env | Purpose |
 |-----|---------|
-| `R2_ADMIN_BUCKET_NAME` | Admin package R2 bucket |
-| `R2_ADMIN_PUBLIC_DOMAIN` | Public hostname for `{tourId}/` |
+| `TOUR_ADMIN_PUBLISH_ROOT` | VPS path for admin ZIP extract (`…/admin/{tourId}/`) — **production** |
+| `TOUR_ADMIN_PUBLIC_HOST` | Public host (e.g. `tour.proppik.cloud`) |
+| `TOUR_ADMIN_PUBLIC_PATH_PREFIX` | URL prefix before `{tourId}` (default `/admin`) |
+| `R2_ADMIN_BUCKET_NAME` | Legacy admin package R2 bucket (dev / omit when VPS root is set) |
+| `R2_ADMIN_PUBLIC_DOMAIN` | Legacy public hostname for flat `{tourId}/` on R2 |
 
 Permission: `tour_admin_upload`. UI: Tour view → Upload admin package (`/upload?tour=…&artifact=tour_admin`).
 

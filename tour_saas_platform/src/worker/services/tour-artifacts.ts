@@ -1,10 +1,13 @@
 // ============================================================
 // Per-tour artifact pointers (publish URL, last success, session).
 // ============================================================
+import type { Env } from '../types'
 import {
   ARTIFACT_TYPE_TOUR_ADMIN,
   adminPublishPrefix,
-  adminPublishUrl,
+  adminPublishUrlLegacyR2,
+  resolveAdminPublishUrlFromEnv,
+  usesVpsAdminPublish,
   type ArtifactType,
 } from './admin-paths'
 
@@ -89,15 +92,28 @@ export async function markTourArtifactReady(
   input: {
     tourId: string
     artifactType: string
-    publicDomain: string
+    env?: Env
+    publicDomain?: string
     layout?: string | null
     /** From Go processor when available (includes index.html). */
     publishUrl?: string | null
   },
 ): Promise<{ publishUrl: string }> {
   const now = new Date().toISOString()
+  const vps = input.env ? usesVpsAdminPublish(input.env) : false
+  const pathPrefix = input.env?.TOUR_ADMIN_PUBLIC_PATH_PREFIX
+  const fallbackFromEnv = input.env
+    ? resolveAdminPublishUrlFromEnv(input.env, input.tourId)
+    : null
+  const fallbackLegacy = input.publicDomain?.trim()
+    ? adminPublishUrlLegacyR2(input.publicDomain.trim(), input.tourId)
+    : null
   const publishUrl =
-    input.publishUrl?.trim() || adminPublishUrl(input.publicDomain, input.tourId)
+    input.publishUrl?.trim() || fallbackFromEnv || fallbackLegacy || ''
+  if (!publishUrl) {
+    throw new Error('Could not resolve admin publish URL')
+  }
+  const webPrefix = adminPublishPrefix(input.tourId, vps, pathPrefix)
   const existing = await getTourArtifact(db, input.tourId, input.artifactType)
   if (existing) {
     await db
@@ -109,7 +125,7 @@ export async function markTourArtifactReady(
                 updated_at = ?
           WHERE id = ?`,
       )
-      .bind(publishUrl, adminPublishPrefix(input.tourId), now, existing.id)
+      .bind(publishUrl, webPrefix, now, existing.id)
       .run()
   } else {
     await db
@@ -125,7 +141,7 @@ export async function markTourArtifactReady(
         input.tourId,
         input.artifactType,
         publishUrl,
-        adminPublishPrefix(input.tourId),
+        webPrefix,
         now,
         now,
       )

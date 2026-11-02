@@ -28,6 +28,11 @@ type Config struct {
 	R2AdminBucketName   string
 	R2AdminPublicDomain string
 
+	// VPS publish for tour_admin (PHP host); when set, R2 admin bucket is not used for publish.
+	TourAdminPublishRoot      string
+	TourAdminPublicHost       string
+	TourAdminPublicPathPrefix string
+
 	// HTTP server
 	Port string
 
@@ -72,8 +77,11 @@ func Load() (*Config, error) {
 		R2SecretAccessKey: getEnv("R2_SECRET_ACCESS_KEY", ""),
 		R2BucketName:        getEnv("R2_BUCKET_NAME", "tour-saas-uploads"),
 		R2PublicDomain:      getEnv("R2_PUBLIC_DOMAIN", ""),
-		R2AdminBucketName:   getEnv("R2_ADMIN_BUCKET_NAME", ""),
-		R2AdminPublicDomain: getEnv("R2_ADMIN_PUBLIC_DOMAIN", ""),
+		R2AdminBucketName:         getEnv("R2_ADMIN_BUCKET_NAME", ""),
+		R2AdminPublicDomain:       getEnv("R2_ADMIN_PUBLIC_DOMAIN", ""),
+		TourAdminPublishRoot:      getEnv("TOUR_ADMIN_PUBLISH_ROOT", ""),
+		TourAdminPublicHost:       getEnv("TOUR_ADMIN_PUBLIC_HOST", ""),
+		TourAdminPublicPathPrefix: getEnv("TOUR_ADMIN_PUBLIC_PATH_PREFIX", ""),
 		Port:                getEnv("PORT", "9000"),
 		TempDir:           getEnv("TEMP_DIR", os.TempDir()),
 

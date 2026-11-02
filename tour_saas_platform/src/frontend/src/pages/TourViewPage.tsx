@@ -928,7 +928,7 @@ export function TourViewPage({ user }: { user: AuthUser }) {
               <EmptyState
                 icon={Clock}
                 title="No admin package history"
-                description="Upload a tour-admin ZIP to publish the admin site for this tour (separate R2 bucket)."
+                description="Upload a tour-admin ZIP to publish the PHP admin site (tour.proppik.cloud/admin/… or legacy R2 when configured)."
               />
             ) : (
               <div className="flex flex-col gap-3 p-4">

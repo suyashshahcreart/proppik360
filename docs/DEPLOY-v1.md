@@ -9,6 +9,7 @@ Monorepo: `tour_saas_platform` (Node API + React admin) + `tour_processor` (Go).
 | **https://360.proppik.cloud** | Admin UI; nginx serves static build and proxies **`/api`** to Node |
 | **https://api360.proppik.cloud** | Node API (optional public alias; same backend as `/api` on 360) |
 | **https://proppik360.com** | Public 360 viewers (Cloudflare R2 custom domain) |
+| **https://tour.proppik.cloud/admin/{tourId}/** | Per-tour PHP tour-admin site (VPS docroot, not R2) |
 
 Go processor listens on **`127.0.0.1:9000` only** — do not expose port 9000 on the public internet.
 
@@ -66,7 +67,15 @@ R2_PUBLIC_DOMAIN=proppik360.com
 
 PROCESSOR_WEBHOOK_URL=http://127.0.0.1:9000/jobs
 PROCESSOR_SECRET=<long random secret — same in tour_processor/.env>
+
+# Tour admin ZIP → PHP host (same VPS as API/processor)
+TOUR_ADMIN_PUBLISH_ROOT=/var/www/html/domain/tour.proppik.cloud/public_html/admin
+TOUR_ADMIN_PUBLIC_HOST=tour.proppik.cloud
+TOUR_ADMIN_PUBLIC_PATH_PREFIX=/admin
+TOUR_ADMIN_CORS_ORIGINS=https://tour.proppik.cloud
 ```
+
+Ensure the processor user (e.g. `www-data`) can write `TOUR_ADMIN_PUBLISH_ROOT` (group ownership or ACL). Nginx/PHP for `tour.proppik.cloud` must serve `{root}/{6-digit-tourId}/index.html`.
 
 Install, database, frontend build:
 
@@ -102,6 +111,10 @@ R2_BUCKET_NAME=proppik360
 R2_PUBLIC_DOMAIN=proppik360.com
 TEMP_DIR=/opt/proppik360/data/temp
 MAX_CONCURRENT_JOBS=2
+
+TOUR_ADMIN_PUBLISH_ROOT=/var/www/html/domain/tour.proppik.cloud/public_html/admin
+TOUR_ADMIN_PUBLIC_HOST=tour.proppik.cloud
+TOUR_ADMIN_PUBLIC_PATH_PREFIX=/admin
 ```
 
 Build and test:

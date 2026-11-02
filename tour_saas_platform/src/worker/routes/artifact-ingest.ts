@@ -21,8 +21,10 @@ import {
 } from '../services/processor-ingest-admin'
 import {
   ARTIFACT_TYPE_TOUR_ADMIN,
-  adminPublishUrl,
+  adminPublishConfigError,
+  resolveAdminPublishUrlFromEnv,
   backupVersionLabel,
+  usesVpsAdminPublish,
 } from '../services/admin-paths'
 import { DEFAULT_INGEST_CHUNK_BYTES } from '../services/tour-paths'
 import {
@@ -44,14 +46,8 @@ const artifactIngest = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 const ARTIFACT = ARTIFACT_TYPE_TOUR_ADMIN
 
-function requireAdminBucket(env: Env): string | null {
-  if (!env.R2_ADMIN_BUCKET_NAME?.trim() || !env.ADMIN_BUCKET) {
-    return 'Admin R2 bucket is not configured (set R2_ADMIN_BUCKET_NAME)'
-  }
-  if (!env.R2_ADMIN_PUBLIC_DOMAIN?.trim()) {
-    return 'Admin public domain is not configured (set R2_ADMIN_PUBLIC_DOMAIN)'
-  }
-  return null
+function requireAdminPublishConfig(env: Env): string | null {
+  return adminPublishConfigError(env)
 }
 
 async function countPriorArtifactVersions(
@@ -91,7 +87,7 @@ artifactIngest.post(
   authMiddleware,
   requirePermission('tour_admin_upload'),
   async (c) => {
-    const bucketErr = requireAdminBucket(c.env)
+    const bucketErr = requireAdminPublishConfig(c.env)
     if (bucketErr) return c.json(err('MISCONFIGURED', bucketErr), 503)
 
     const user = c.get('user')
@@ -405,10 +401,12 @@ artifactIngest.get(
     if (!tour) return c.json(err('NOT_FOUND', 'Tour not found'), 404)
 
     const artifact = await getTourArtifact(c.env.DB, tour.tour_id, ARTIFACT)
-    const domain = c.env.R2_ADMIN_PUBLIC_DOMAIN?.trim() ?? ''
+    const vps = usesVpsAdminPublish(c.env)
     const publishUrl =
-      artifact?.publish_url ??
-      (domain ? adminPublishUrl(domain, tour.tour_id) : null)
+      artifact?.publish_url ?? resolveAdminPublishUrlFromEnv(c.env, tour.tour_id)
+    const publicHost = vps
+      ? c.env.TOUR_ADMIN_PUBLIC_HOST?.trim() ?? null
+      : c.env.R2_ADMIN_PUBLIC_DOMAIN?.trim() ?? null
 
     return c.json(
       ok({
@@ -420,7 +418,8 @@ artifactIngest.get(
         lastUploadAt: artifact?.last_upload_at ?? null,
         backupKey: artifact?.backup_r2_key ?? null,
         backupVersion: artifact?.backup_version ?? null,
-        publicDomain: domain || null,
+        publicDomain: publicHost,
+        publishMode: vps ? 'vps' : 'r2',
       }),
     )
   },

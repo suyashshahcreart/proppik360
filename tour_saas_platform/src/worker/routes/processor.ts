@@ -414,18 +414,32 @@ processor.post(`/artifacts/:tourId/${ARTIFACT_ADMIN}/complete`, async (c) => {
     saveBackupZip?: boolean
   }
 
-  const domain = c.env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
-  if (!domain && !publishUrl) {
-    return c.json(err('MISCONFIGURED', 'R2_ADMIN_PUBLIC_DOMAIN is not set'), 503)
+  const { adminPublishConfigError, resolveAdminPublishUrlFromEnv } = await import(
+    '../services/admin-paths'
+  )
+  const configErr = adminPublishConfigError(c.env)
+  const resolvedFallback = resolveAdminPublishUrlFromEnv(c.env, tourId)
+  if (!publishUrl?.trim() && !resolvedFallback) {
+    return c.json(
+      err('MISCONFIGURED', configErr ?? 'Admin publish is not configured'),
+      503,
+    )
   }
 
-  const ready = await markTourArtifactReady(c.env.DB, {
-    tourId,
-    artifactType: ARTIFACT_ADMIN,
-    publicDomain: domain || 'localhost',
-    layout: layout ?? null,
-    publishUrl: publishUrl ?? null,
-  })
+  let ready: { publishUrl: string }
+  try {
+    ready = await markTourArtifactReady(c.env.DB, {
+      tourId,
+      artifactType: ARTIFACT_ADMIN,
+      env: c.env,
+      publicDomain: c.env.R2_ADMIN_PUBLIC_DOMAIN?.trim(),
+      layout: layout ?? null,
+      publishUrl: publishUrl ?? null,
+    })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Could not save publish URL'
+    return c.json(err('MISCONFIGURED', message), 503)
+  }
   const finalUrl = ready.publishUrl
   const wantsBackup = Boolean(saveBackupZip)
   const postReadyStage = wantsBackup ? 'ready_pending_backup' : 'cleanup'

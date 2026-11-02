@@ -77,9 +77,12 @@ func main() {
 			Ingest:               ingest,
 			BackupVerifyAttempts: cfg.BackupVerifyAttempts,
 		},
-		AdminR2Client:     adminR2Client,
-		AdminR2BucketName: cfg.R2AdminBucketName,
-		AdminPublicDomain: cfg.R2AdminPublicDomain,
+		AdminR2Client:         adminR2Client,
+		AdminR2BucketName:     cfg.R2AdminBucketName,
+		AdminPublicDomain:     cfg.R2AdminPublicDomain,
+		AdminPublishRoot:      cfg.TourAdminPublishRoot,
+		AdminPublicHost:       cfg.TourAdminPublicHost,
+		AdminPublicPathPrefix: cfg.TourAdminPublicPathPrefix,
 	}
 
 	// Job queue — caps how many tours process at the same time.

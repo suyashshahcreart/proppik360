@@ -1,6 +1,8 @@
 /** Must match server default in src/server/env.ts when VITE_R2_PUBLIC_DOMAIN is unset. */
 const DEFAULT_R2_PUBLIC_DOMAIN = 'pub-97f4aa1642a4429982a8583c0cf894c0.r2.dev'
 
+const DEFAULT_ADMIN_PUBLIC_PATH_PREFIX = '/admin'
+
 export function getR2PublicDomain(): string {
   const raw = import.meta.env.VITE_R2_PUBLIC_DOMAIN as string | undefined
   return (raw?.trim() || DEFAULT_R2_PUBLIC_DOMAIN)
@@ -8,11 +10,42 @@ export function getR2PublicDomain(): string {
     .replace(/\/$/, '')
 }
 
-function getAdminPublicDomain(): string | null {
-  const raw = import.meta.env.VITE_R2_ADMIN_PUBLIC_DOMAIN as string | undefined
-  const trimmed = raw?.trim()
-  if (!trimmed) return null
-  return trimmed.replace(/^https?:\/\//, '').replace(/\/$/, '')
+function normalizeAdminPathPrefix(prefix?: string | null): string {
+  const raw = (prefix?.trim() || DEFAULT_ADMIN_PUBLIC_PATH_PREFIX).replace(/\/+$/, '')
+  if (!raw.startsWith('/')) return `/${raw}`
+  return raw || DEFAULT_ADMIN_PUBLIC_PATH_PREFIX
+}
+
+function getAdminPublicHost(): string | null {
+  const vps = import.meta.env.VITE_TOUR_ADMIN_PUBLIC_HOST as string | undefined
+  if (vps?.trim()) {
+    return vps.trim().replace(/^https?:\/\//, '').replace(/\/$/, '')
+  }
+  const legacy = import.meta.env.VITE_R2_ADMIN_PUBLIC_DOMAIN as string | undefined
+  if (legacy?.trim()) {
+    return legacy.trim().replace(/^https?:\/\//, '').replace(/\/$/, '')
+  }
+  return null
+}
+
+function getAdminPathPrefix(): string | null {
+  const vpsRoot = import.meta.env.VITE_TOUR_ADMIN_PUBLISH_ROOT as string | undefined
+  const vpsHost = import.meta.env.VITE_TOUR_ADMIN_PUBLIC_HOST as string | undefined
+  if (vpsRoot?.trim() && vpsHost?.trim()) {
+    const raw = import.meta.env.VITE_TOUR_ADMIN_PUBLIC_PATH_PREFIX as string | undefined
+    return normalizeAdminPathPrefix(raw)
+  }
+  if (import.meta.env.VITE_R2_ADMIN_PUBLIC_DOMAIN?.trim()) {
+    return null
+  }
+  return null
+}
+
+function usesVpsAdminPreview(): boolean {
+  return Boolean(
+    import.meta.env.VITE_TOUR_ADMIN_PUBLISH_ROOT?.trim() &&
+      import.meta.env.VITE_TOUR_ADMIN_PUBLIC_HOST?.trim(),
+  )
 }
 
 /** CDN prefix URLs cleared for one tour (mirrors server buildTourPurgePrefixes). */
@@ -24,8 +57,10 @@ export function buildTourPurgePrefixUrls(tourId: string): string[] {
     `https://${main}/${pid}/`,
     `https://${main}/tours/${pid}/`,
   ]
-  const admin = getAdminPublicDomain()
-  if (admin) prefixes.push(`https://${admin}/${pid}/`)
+  if (!usesVpsAdminPreview()) {
+    const admin = getAdminPublicHost()
+    if (admin) prefixes.push(`https://${admin}/${pid}/`)
+  }
   return [...new Set(prefixes)]
 }
 
@@ -63,14 +98,23 @@ function normalizeAdminEntryUrl(url: string): string {
   return `${trimmed}/index.html`
 }
 
-/** Admin package public URL (separate R2 bucket / domain). */
+/** Expected admin entry URL from Vite env (VPS or legacy R2). */
 export function buildExpectedAdminUrl(
   tourId: string,
   publicDomain?: string | null,
 ): string | null {
-  const raw = publicDomain?.trim()
-  if (!raw) return null
-  const host = raw.replace(/^https?:\/\//, '').replace(/\/$/, '')
+  const hostFromArg = publicDomain?.trim()
+    ? publicDomain.replace(/^https?:\/\//, '').replace(/\/$/, '')
+    : null
+  const host = hostFromArg || getAdminPublicHost()
+  if (!host) return null
+
+  if (usesVpsAdminPreview() || (hostFromArg && getAdminPathPrefix())) {
+    const prefix = getAdminPathPrefix() ?? DEFAULT_ADMIN_PUBLIC_PATH_PREFIX
+    const path = `${prefix}/${tourId}/index.html`.replace(/\/+/g, '/')
+    return `https://${host}${path}`
+  }
+
   return `https://${host}/${tourId}/index.html`
 }
 

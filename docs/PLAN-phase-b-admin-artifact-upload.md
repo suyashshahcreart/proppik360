@@ -64,3 +64,24 @@ Processor callbacks (X-Processor-Secret):
 | Consolidate viewer history | Backfill `artifact_type=tour_viewer` |
 
 See also [SETTINGS.md](./SETTINGS.md) for tour-admin login APIs used by the published admin package.
+
+## Phase B2: VPS admin host (production)
+
+Tour-admin packages with **PHP** are published to disk, not admin R2:
+
+```text
+SaaS UI  →  same ingest APIs
+         →  Go admin pipeline (VPS mode when TOUR_ADMIN_PUBLISH_ROOT is set)
+         →  {TOUR_ADMIN_PUBLISH_ROOT}/{tourId}/  on the VPS
+         →  https://tour.proppik.cloud/admin/{tourId}/index.html
+```
+
+| Variable | Purpose |
+|----------|---------|
+| `TOUR_ADMIN_PUBLISH_ROOT` | Absolute path; per-tour subfolder `{tourId}/` |
+| `TOUR_ADMIN_PUBLIC_HOST` | e.g. `tour.proppik.cloud` |
+| `TOUR_ADMIN_PUBLIC_PATH_PREFIX` | Default `/admin` |
+
+When publish root is set, **`R2_ADMIN_*` is optional**. Main tour viewer remains on `R2_PUBLIC_DOMAIN`. Tour-admin **Save** still uses `/api/tour-admin/:tourId/fs/*` → main viewer R2 bucket.
+
+Deploy notes: [DEPLOY-v1.md](./DEPLOY-v1.md).

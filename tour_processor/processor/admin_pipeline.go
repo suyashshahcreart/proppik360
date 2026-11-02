@@ -15,9 +15,12 @@ import (
 // AdminPipelineConfig extends PipelineConfig with a separate R2 client/domain for admin packages.
 type AdminPipelineConfig struct {
 	PipelineConfig
-	AdminR2Client     *r2.Client
-	AdminR2BucketName string
-	AdminPublicDomain string
+	AdminR2Client         *r2.Client
+	AdminR2BucketName     string
+	AdminPublicDomain     string
+	AdminPublishRoot      string
+	AdminPublicHost       string
+	AdminPublicPathPrefix string
 }
 
 // RunAdminPipeline publishes a tour_admin ZIP to the admin R2 bucket.
@@ -37,12 +40,7 @@ func RunAdminPipeline(ctx context.Context, cfg AdminPipelineConfig, tourID strin
 }
 
 func runAdminPipeline(ctx context.Context, cfg AdminPipelineConfig, tourID string) error {
-	if cfg.AdminR2Client == nil {
-		return fmt.Errorf("admin R2 client is not configured (set R2_ADMIN_BUCKET_NAME)")
-	}
-	if strings.TrimSpace(cfg.AdminPublicDomain) == "" {
-		return fmt.Errorf("R2_ADMIN_PUBLIC_DOMAIN is not configured")
-	}
+	vpsMode := strings.TrimSpace(cfg.AdminPublishRoot) != ""
 
 	attempts := cfg.BackupVerifyAttempts
 	if attempts <= 0 {
@@ -63,6 +61,30 @@ func runAdminPipeline(ctx context.Context, cfg AdminPipelineConfig, tourID strin
 	}
 	if _, err := os.Stat(sess.ZipPath); err != nil {
 		return fmt.Errorf("admin ZIP missing: %w", err)
+	}
+
+	if vpsMode {
+		if strings.TrimSpace(cfg.AdminPublicHost) == "" {
+			return fmt.Errorf("TOUR_ADMIN_PUBLIC_HOST is not configured")
+		}
+		if !sess.PublishDone {
+			if err := runAdminPublishVPS(ctx, cfg, tourID, sessionKey, sess); err != nil {
+				return err
+			}
+		}
+		if sess.SaveBackupZip {
+			if err := runAdminBackupVPS(ctx, cfg, tourID, sess, attempts); err != nil {
+				return err
+			}
+		}
+		return finishAdminCleanupVPS(ctx, cfg, tourID, sessionKey, sess, attempts)
+	}
+
+	if cfg.AdminR2Client == nil {
+		return fmt.Errorf("admin R2 client is not configured (set R2_ADMIN_BUCKET_NAME)")
+	}
+	if strings.TrimSpace(cfg.AdminPublicDomain) == "" {
+		return fmt.Errorf("R2_ADMIN_PUBLIC_DOMAIN is not configured")
 	}
 
 	if !sess.PublishDone {

@@ -1598,7 +1598,7 @@ export function UploadPage({ user }: { user: User }) {
         title={isAdminArtifact ? 'Upload Admin Package' : 'Upload Tour'}
         description={
           isAdminArtifact
-            ? 'Upload the tour-admin ZIP package for this tour. Stored in a separate R2 bucket; does not change tour viewer status.'
+            ? 'Upload the tour-admin ZIP package for this tour. Publishes to the admin web host (VPS) or legacy R2; does not change main tour viewer status.'
             : 'Select an existing tour, then upload its ZIP. Tours must be created first — the upload uses the tour id as the storage folder.'
         }
         breadcrumbs={[

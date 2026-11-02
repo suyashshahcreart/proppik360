@@ -50,6 +50,15 @@ export interface Env {
   /** Public hostname for admin package links (custom domain; no protocol). */
   R2_ADMIN_PUBLIC_DOMAIN?: string
 
+  /** Absolute dir for VPS admin deploy: {root}/{tourId}/ (PHP host). */
+  TOUR_ADMIN_PUBLISH_ROOT?: string
+
+  /** Public hostname for tour.proppik.cloud-style admin URLs (no protocol). */
+  TOUR_ADMIN_PUBLIC_HOST?: string
+
+  /** URL path before {tourId}, default /admin */
+  TOUR_ADMIN_PUBLIC_PATH_PREFIX?: string
+
   /** Multipart upload part size in bytes. Stored as string, parsed in code. */
   PART_SIZE_BYTES: string
 

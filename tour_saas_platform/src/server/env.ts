@@ -60,6 +60,10 @@ export function createRuntimeEnv(): Env {
     R2_BUCKET_NAME: r2Config.bucketName,
     R2_ADMIN_BUCKET_NAME: adminBucketName,
     R2_ADMIN_PUBLIC_DOMAIN: process.env.R2_ADMIN_PUBLIC_DOMAIN?.trim() || undefined,
+    TOUR_ADMIN_PUBLISH_ROOT: process.env.TOUR_ADMIN_PUBLISH_ROOT?.trim() || undefined,
+    TOUR_ADMIN_PUBLIC_HOST: process.env.TOUR_ADMIN_PUBLIC_HOST?.trim() || undefined,
+    TOUR_ADMIN_PUBLIC_PATH_PREFIX:
+      process.env.TOUR_ADMIN_PUBLIC_PATH_PREFIX?.trim() || undefined,
     PART_SIZE_BYTES: process.env.PART_SIZE_BYTES ?? '26214400',
     UPLOAD_CONCURRENCY: process.env.UPLOAD_CONCURRENCY ?? '8',
     MAX_RETRIES: process.env.MAX_RETRIES ?? '3',

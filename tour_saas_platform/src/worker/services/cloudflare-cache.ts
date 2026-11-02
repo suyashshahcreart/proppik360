@@ -2,6 +2,7 @@
 // Cloudflare zone cache purge (tour prefixes + custom / bulk)
 // ============================================================
 import type { Env } from '../types'
+import { isTourAdminVpsPublishConfigured } from './admin-paths'
 import { legacyTourDeletePrefix, tourR2Prefix } from '../utils/tour-storage'
 import { listObjectsPage, type R2Config } from './r2'
 
@@ -70,9 +71,11 @@ export function buildTourPurgePrefixes(tourId: string, env: Env): string[] {
     prefixes.push(prefixUrl(mainHost, legacyTourDeletePrefix(pid)))
   }
 
-  const adminHost = env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
-  if (adminHost) {
-    prefixes.push(prefixUrl(adminHost, tourR2Prefix(pid)))
+  if (!isTourAdminVpsPublishConfigured(env)) {
+    const adminHost = env.R2_ADMIN_PUBLIC_DOMAIN?.trim()
+    if (adminHost) {
+      prefixes.push(prefixUrl(adminHost, tourR2Prefix(pid)))
+    }
   }
 
   return [...new Set(prefixes)]
