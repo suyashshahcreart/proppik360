@@ -16,7 +16,6 @@ import { propertyTypeRoutes } from './routes/property-types'
 import { processorStatusRoutes } from './routes/processor-status'
 import { tourAdminPublicRoutes } from './routes/tour-admin-public'
 import { tourAdminFsRoutes } from './routes/tour-admin-fs'
-import { tourAdminAnalyticsRoutes } from './routes/tour-admin-analytics'
 import { publicToursRoutes } from './routes/public-tours'
 import type { Env, Variables } from './types'
 
@@ -90,7 +89,6 @@ app.route('/api/system', processorStatusRoutes)
 app.route('/api/system', systemRoutes)
 app.route('/api/tour-admin', tourAdminPublicRoutes)
 app.route('/api/tour-admin/:tourId/fs', tourAdminFsRoutes)
-app.route('/api/tour-admin/:tourId/analytics', tourAdminAnalyticsRoutes)
 app.route('/api/public', publicToursRoutes)
 
 app.get('/health', (c) => c.json({ ok: true, service: 'proppik360-api' }))
