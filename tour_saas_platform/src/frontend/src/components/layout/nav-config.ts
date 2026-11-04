@@ -1,5 +1,6 @@
 import {
   LayoutDashboard,
+  BarChart3,
   Compass,
   Users,
   UploadCloud,
@@ -30,6 +31,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
       { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, permission: 'dashboard_view' },
+      { label: 'Analytics', to: '/analytics', icon: BarChart3, permission: 'analytics_view' },
       { label: 'Tours', to: '/tours', icon: Compass, permission: 'tour_view' },
       { label: 'Customers', to: '/customers', icon: Users, permission: 'customer_view' },
       { label: 'Upload Tour', to: '/upload', icon: UploadCloud, permission: 'tour_create' },

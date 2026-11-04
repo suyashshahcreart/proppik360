@@ -78,5 +78,7 @@ export function createRuntimeEnv(): Env {
     CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN?.trim() || undefined,
     CLOUDFLARE_ZONE_ID: process.env.CLOUDFLARE_ZONE_ID?.trim() || undefined,
     CLOUDFLARE_ADMIN_ZONE_ID: process.env.CLOUDFLARE_ADMIN_ZONE_ID?.trim() || undefined,
+    ANALYTICS_API_BASE: process.env.ANALYTICS_API_BASE?.trim() || undefined,
+    ANALYTICS_SERVICE_KEY: process.env.ANALYTICS_SERVICE_KEY?.trim() || undefined,
   }
 }

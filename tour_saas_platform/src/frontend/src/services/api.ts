@@ -986,4 +986,105 @@ export const api = {
       }),
   },
 
+  analytics: {
+    ping: () => request<{ online: boolean }>('/analytics/ping'),
+
+    overview: (queryString: string) =>
+      request<Record<string, unknown>>(`/analytics/overview?${queryString}`),
+
+    projects: (queryString: string) =>
+      request<{ projects: AnalyticsProjectRow[] }>(`/analytics/projects?${queryString}`),
+
+    tour: (tourId: string) => ({
+      overview: (queryString: string) =>
+        request<AnalyticsTourOverviewRaw>(`/analytics/tours/${tourId}/overview?${queryString}`),
+      scenes: (queryString: string) =>
+        request<unknown>(`/analytics/tours/${tourId}/scenes?${queryString}`),
+      sessions: (queryString: string) =>
+        request<unknown>(`/analytics/tours/${tourId}/sessions?${queryString}`),
+      breakdowns: (queryString: string) =>
+        request<AnalyticsBreakdowns>(`/analytics/tours/${tourId}/breakdowns?${queryString}`),
+      insights: (queryString: string) =>
+        request<AnalyticsInsights>(`/analytics/tours/${tourId}/insights?${queryString}`),
+      audienceHidden: (queryString: string) =>
+        request<AnalyticsAudienceHidden>(`/analytics/tours/${tourId}/audience-hidden?${queryString}`),
+      urls: (queryString: string) =>
+        request<AnalyticsUrlRow[]>(`/analytics/tours/${tourId}/urls?${queryString}`),
+      visitors: (queryString: string) =>
+        request<AnalyticsVisitorRow[]>(`/analytics/tours/${tourId}/visitors?${queryString}`),
+      meta: () => request<{ name?: string; tour_key?: string }>(`/analytics/tours/${tourId}/meta`),
+    }),
+
+    sessionTimeline: (sid: string, tourId: string) =>
+      request<{ tour_key?: string; blocks: AnalyticsTimelineBlock[] }>(
+        `/analytics/sessions/${encodeURIComponent(sid)}/timeline?tourId=${encodeURIComponent(tourId)}`,
+      ),
+  },
+
+}
+
+export interface AnalyticsProjectRow {
+  tour_key: string
+  visitors: number
+  sessions: number
+  avg_session_ms: number
+  cta_rate: number
+  last_visited_at?: string | null
+}
+
+export interface AnalyticsTourOverviewRaw {
+  tour_key?: string
+  visitors: number
+  sessions: number
+  scenes_per_session: number
+  cta_clicks: number
+  lead_submits: number
+  avg_session_ms: number
+  by_type?: Record<string, number>
+}
+
+export interface AnalyticsBreakdowns {
+  ctas: { label: string; clicks: number; unique_visitors: number }[]
+  info_points: { label: string; opens: number; unique_visitors: number; avg_open_ms: number }[]
+  controls: { action: string; count: number; unique_visitors: number }[]
+}
+
+export interface AnalyticsInsights {
+  funnel_pct: Record<string, number>
+  bounce_rate: number
+  avg_engagement_score: number
+  trend: { date: string; visitors: number; sessions: number }[]
+  top_paths?: { steps: string[]; count: number }[]
+  transitions?: { from: string; to: string; count: number }[]
+}
+
+export interface AnalyticsAudienceHidden {
+  preview_sessions_hidden: number
+  synthetic_sessions_hidden: number
+}
+
+export interface AnalyticsUrlRow {
+  url: string
+  sessions: number
+  visitors: number
+  avg_session_ms: number
+}
+
+export interface AnalyticsVisitorRow {
+  vid: string
+  first_seen?: string
+  last_seen?: string
+  visits: number
+  total_time_ms: number
+  sessions: string[]
+}
+
+export interface AnalyticsTimelineBlock {
+  scene_id?: string
+  scene_name?: string
+  dwell_ms?: number
+  active_ms?: number
+  entered_at?: string
+  exited_at?: string
+  actions: { label: string; t: string; ts: number; p?: Record<string, unknown> }[]
 }

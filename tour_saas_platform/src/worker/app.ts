@@ -17,6 +17,7 @@ import { processorStatusRoutes } from './routes/processor-status'
 import { tourAdminPublicRoutes } from './routes/tour-admin-public'
 import { tourAdminFsRoutes } from './routes/tour-admin-fs'
 import { publicToursRoutes } from './routes/public-tours'
+import { analyticsRoutes } from './routes/analytics'
 import type { Env, Variables } from './types'
 
 function allowedCorsOrigins(env: Env, path: string): string[] {
@@ -90,6 +91,7 @@ app.route('/api/system', systemRoutes)
 app.route('/api/tour-admin', tourAdminPublicRoutes)
 app.route('/api/tour-admin/:tourId/fs', tourAdminFsRoutes)
 app.route('/api/public', publicToursRoutes)
+app.route('/api/analytics', analyticsRoutes)
 
 app.get('/health', (c) => c.json({ ok: true, service: 'proppik360-api' }))
 

@@ -5,6 +5,7 @@ import {
   Calendar,
   CheckCircle2,
   Compass,
+  BarChart3,
   Copy,
   ExternalLink,
   FileArchive,
@@ -373,6 +374,14 @@ export function TourViewPage({ user }: { user: AuthUser }) {
                     <ExternalLink className="size-4" />
                     Open viewer
                   </a>
+                </Button>
+              )}
+              {can(user, 'analytics_view') && (
+                <Button asChild size="sm" variant="outline">
+                  <Link to={`/analytics/tours/${tour.tour_id}`}>
+                    <BarChart3 className="size-4" />
+                    Tour analytics
+                  </Link>
                 </Button>
               )}
               {tour && (

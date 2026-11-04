@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { api } from './services/api'
 import { AppShell } from './components/layout/AppShell'
 import { Toaster } from './components/ui/sonner'
@@ -17,6 +17,12 @@ import { SystemUsersPage } from './pages/SystemUsersPage'
 import { MediaLibraryPage } from './pages/MediaLibraryPage'
 import { PropertyTypesPage } from './pages/PropertyTypesPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { AnalyticsOverviewPage } from './pages/analytics/AnalyticsOverviewPage'
+import { AnalyticsTourPage } from './pages/analytics/AnalyticsTourPage'
+import { AnalyticsTourUrlsPage } from './pages/analytics/AnalyticsTourUrlsPage'
+import { AnalyticsTourVisitorsPage } from './pages/analytics/AnalyticsTourVisitorsPage'
+import { AnalyticsSessionPage } from './pages/analytics/AnalyticsSessionPage'
+import { AnalyticsApiStatusProvider } from './hooks/useAnalyticsApiStatus'
 import type { User } from './types'
 
 /** Returns true if the user has the given permission. */
@@ -241,6 +247,23 @@ export function App() {
               </PermissionRoute>
             }
           />
+
+          <Route
+            element={
+              <PermissionRoute user={user} permission="analytics_view">
+                <AnalyticsApiStatusProvider>
+                  <Outlet />
+                </AnalyticsApiStatusProvider>
+              </PermissionRoute>
+            }
+          >
+            <Route path="analytics" element={<AnalyticsOverviewPage />} />
+            <Route path="analytics/overview" element={<AnalyticsOverviewPage />} />
+            <Route path="analytics/tours/:tourId/urls" element={<AnalyticsTourUrlsPage />} />
+            <Route path="analytics/tours/:tourId/visitors" element={<AnalyticsTourVisitorsPage />} />
+            <Route path="analytics/tours/:tourId" element={<AnalyticsTourPage />} />
+            <Route path="analytics/sessions/:sid" element={<AnalyticsSessionPage />} />
+          </Route>
         </Route>
 
         {/* Catch-all */}

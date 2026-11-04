@@ -100,6 +100,12 @@ export interface Env {
 
   /** Optional separate zone when R2_ADMIN_PUBLIC_DOMAIN is on another zone. */
   CLOUDFLARE_ADMIN_ZONE_ID?: string
+
+  /** Tour analytics API (proppik_analytics), e.g. https://analytics.proppik.cloud */
+  ANALYTICS_API_BASE?: string
+
+  /** Shared secret for server-to-server admin API reads */
+  ANALYTICS_SERVICE_KEY?: string
 }
 
 /**
